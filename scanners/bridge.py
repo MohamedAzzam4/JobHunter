@@ -17,6 +17,7 @@ from pathlib import Path
 from .base import ScanResult, JobPosting
 from utils.filters import TitleFilter, LocationFilter, filter_jobs
 from utils.dedup import DeduplicatorStore
+from utils.jd_cache import JDCache
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class PipelineBridge:
         self.title_filter = TitleFilter(config)
         self.location_filter = LocationFilter(config)
         self.dedup = DeduplicatorStore(data_dir)
+        self.jd_cache = JDCache()
 
         # Ensure pipeline.md exists
         self.pipeline_path = self.data_dir / "pipeline.md"
@@ -103,6 +105,17 @@ class PipelineBridge:
         if not dry_run and new_jobs:
             self._append_to_pipeline(new_jobs)
             self._append_to_history(new_jobs, date, "added")
+            # Cache JDs from scanner (critical for Indeed which blocks re-fetch)
+            for job in new_jobs:
+                desc = job.get("description", "")
+                if desc:
+                    self.jd_cache.put(
+                        job.get("url", ""),
+                        desc,
+                        title=job.get("title", ""),
+                        company=job.get("company", ""),
+                    )
+            self.jd_cache.save()
 
         # Write rejected/duped to history too (for tracking)
         if not dry_run:

@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from .openrouter_client import OpenRouterClient
+from .smart_router import SmartRouter
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +30,26 @@ Score each dimension 1-5, then provide a weighted global score.
 ## Scoring Dimensions
 1. **Skills Match (30%)**: Do the candidate's technical or non-technical skills match?
 2. **Education Match (20%)**: Is the candidate's degree (M.Sc. Autonomy Technologies, B.Sc. Computer Engineering) relevant?
-3. **Location (20%)**: Is the job in Erlangen, Nürnberg, Bamberg, Forchheim, Herzogenaurach, Fürth, or Munich?
-4. **Language (20%)**: Is the posting in English? Does it require German fluency that the candidate doesn't have (only A2)?
+3. **Location (20%)**: Is the job in Erlangen, Nurnberg, Bamberg, Forchheim, Herzogenaurach, Furth, or Munich?
+4. **Language (20%)**: Does the role EXPLICITLY require German fluency (B2 or higher)? See rules below.
 5. **Growth (10%)**: Learning opportunity, thesis potential, career relevance?
 
-## IMPORTANT RULES
+## IMPORTANT LANGUAGE RULES
+- The candidate speaks English C1 and German A2 (basic)
+- A job posting WRITTEN in German does NOT automatically mean German is required for the role
+- Many German companies post in German but accept English-speaking employees
+- ONLY mark german_required=true if the JD EXPLICITLY states one of these:
+  - "Fliessende Deutschkenntnisse" / "Deutsch fliessend" / "verhandlungssicher Deutsch"
+  - "Deutschkenntnisse mindestens B2/C1/C2"
+  - "Deutsche Sprachkenntnisse erforderlich"
+  - "sehr gute Deutschkenntnisse"
+- If the JD only says "Grundkenntnisse Deutsch" or "Deutsch von Vorteil", that is OK (A2 is enough)
+- If there is NO mention of language requirements, assume English is sufficient -> Language score = 4
+- If English is explicitly mentioned as working language -> Language score = 5
+
+## OTHER RULES
 - The candidate is open to ALL working student roles, including non-technical (office, admin, data entry)
 - For non-technical roles, evaluate based on transferable skills (Office, communication, English, organization)
-- If the JD requires German fluency (B2+), mark Language score as 1 and note it clearly
 - If location is not in the allowed cities, mark Location as 1
 - Be honest and precise. Don't inflate scores.
 
@@ -80,7 +92,7 @@ class Evaluator:
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        self.client = OpenRouterClient()
+        self.client = SmartRouter()
         self.cv_content = self._load_cv()
         self.profile = self._load_profile()
 
@@ -147,8 +159,8 @@ class Evaluator:
         )
         user = f"Evaluate this job posting:\n\n{description}"
 
-        # Call OpenRouter
-        response = self.client.chat(
+        # Call AI (Google first, OpenRouter fallback)
+        response = self.client.evaluate(
             system_prompt=system,
             user_prompt=user,
             temperature=0.2,
