@@ -1,0 +1,55 @@
+candidate:
+  full_name: "Mohamed Abd Elrhman Azzam"
+  email: "mohammed.abd.elrhman.azzam@gmail.com"
+  phone: "+49 152 5617 2336"
+  location: "Erlangen, Germany"
+  university: "Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU)"
+  degree_current: "M.Sc. Autonomy Technologies (Apr 2026 – Apr 2028)"
+  degree_bachelor: "B.Sc. Computer and Systems Engineering (Honors)"
+  linkedin: "https://linkedin.com/in/mohamedazzam"
+  github: "https://github.com/mohamedazzam"
+
+target_roles:
+  primary:
+    - "Working Student"
+    - "Werkstudent"
+  scope: "all"  # technical AND non-technical
+
+skills:
+  technical:
+    - "AI / Machine Learning / Deep Learning"
+    - "Data Analysis (Python, Pandas, Power BI)"
+    - "AI Agent Development (LangChain, n8n, RAG)"
+    - "Python (OOP, FastAPI, automation)"
+    - "NLP / LLM Fine-Tuning"
+    - "Computer Vision"
+    - "Cloud (AWS EC2, Docker)"
+    - "Web Development (HTML, CSS, JS)"
+    - "Web Scraping (Beautiful Soup, Selenium)"
+    - "SQL / PostgreSQL"
+  non_technical:
+    - "Microsoft Office (Word, Excel, PowerPoint)"
+    - "Data Entry and Management"
+    - "Research and Documentation"
+    - "Workshop Facilitation / Teaching"
+    - "CRM Systems"
+    - "English (C1 IELTS 7)"
+
+preferences:
+  language: "English"
+  german_required: false
+  hours_per_week: 20
+  locations:
+    - "Erlangen"
+    - "Nürnberg"
+    - "Bamberg"
+    - "Forchheim"
+    - "Herzogenaurach"
+    - "Fürth"
+    - "Munich"
+
+evaluation:
+  auto_cv_threshold: 3.5
+  model_primary: "google/gemma-4-31b-it:free"
+  model_backup: "nvidia/nvidia-nemotron-3-super:free"
+  model_fallback: "openai/gpt-oss-120b:free"

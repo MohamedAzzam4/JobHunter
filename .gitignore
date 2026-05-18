@@ -1,6 +1,31 @@
-AIMemoryContext.md
-app_fetch.txt
-gemini_memory.md
-qwen_memory_theFounder.md
-godfather_memory.md
-temp_debug.js
+# Environment
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# Data (user-specific, not shared)
+data/
+reports/
+output/
+logs/
+
+# Node (if using career-ops scan.mjs)
+node_modules/
+career-ops/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,137 @@
+title_filter:
+  positive:
+    - "Working Student"
+    - "Werkstudent"
+    - "Werkstudentin"
+    - "Student Assistant"
+    - "Studentische Hilfskraft"
+    - "HiWi"
+    - "Studentenjob"
+    - "Student Worker"
+    - "Thesis Student"
+    - "Intern"  # Some companies label working students as interns
+  negative:
+    - "Senior Engineer"
+    - "Staff Engineer"
+    - "Principal"
+    - "Director"
+    - "VP "
+    - "Head of"
+    - "Ausbildung"
+    - "Vollzeit"
+    - "Full-time"
+    - "C-Level"
+
+location_filter:
+  allow:
+    - "Erlangen"
+    - "Nürnberg"
+    - "Nuremberg"
+    - "Bamberg"
+    - "Forchheim"
+    - "Herzogenaurach"
+    - "Fürth"
+    - "Munich"
+    - "München"
+    - "Bavaria"
+    - "Bayern"
+    - "Remote"
+    - "Hybrid"
+    - "Germany"
+    - "Deutschland"
+  block: []
+
+tracked_companies:
+  - name: Siemens
+    careers_url: "https://jobs.siemens.com/careers"
+    scan_method: jobspy  # Siemens uses Eightfold.ai (no public API) — discovered via JobSpy
+    notes: "Erlangen HQ. Includes Healthineers postings. Uses Eightfold.ai."
+    enabled: true
+
+  - name: Adidas
+    careers_url: "https://careers.adidas-group.com"
+    scan_method: workday
+    search_terms:
+      - "working student"
+      - "werkstudent"
+    notes: "Herzogenaurach (~20km from Erlangen)"
+    enabled: true
+
+  - name: Puma
+    careers_url: "https://careers.puma.com"
+    scan_method: workday
+    search_terms:
+      - "working student"
+    notes: "Herzogenaurach"
+    enabled: true
+
+  - name: Schaeffler
+    careers_url: "https://www.schaeffler.com/en/careers"
+    scan_method: websearch
+    scan_query: '"working student" OR "werkstudent" site:schaeffler.com'
+    notes: "Herzogenaurach. Automotive supplier."
+    enabled: true
+
+  - name: DATEV
+    careers_url: "https://www.datev.de/web/de/karriere/"
+    scan_method: websearch
+    scan_query: '"working student" OR "werkstudent" site:datev.de'
+    notes: "Nürnberg. Major software company."
+    enabled: true
+
+  - name: Bosch
+    careers_url: "https://www.bosch.com/careers/"
+    scan_method: workday
+    search_terms:
+      - "working student"
+    notes: "Multiple Bavaria locations."
+    enabled: true
+
+  - name: Fraunhofer IIS
+    careers_url: "https://www.iis.fraunhofer.de/en/jobs.html"
+    scan_method: websearch
+    scan_query: '"working student" OR "HiWi" site:fraunhofer.de Erlangen'
+    notes: "Erlangen. Audio/AI research institute."
+    enabled: true
+
+  - name: Continental
+    careers_url: "https://www.continental.com/en/career/"
+    scan_method: websearch
+    scan_query: '"working student" site:continental.com Nuremberg OR Erlangen'
+    notes: "Nürnberg. Automotive technology."
+    enabled: true
+
+  - name: FAU
+    careers_url: "https://www.fau.eu/careers/"
+    scan_method: websearch
+    scan_query: '"student assistant" OR "HiWi" site:fau.de OR site:fau.eu'
+    notes: "Your university — HiWi positions."
+    enabled: true
+
+jobspy_searches:
+  - term: "Working Student"
+    location: "Erlangen, Germany"
+    sites: ["indeed", "linkedin", "google"]
+    results_wanted: 50
+    distance_km: 50
+    enabled: true
+
+  - term: "Werkstudent"
+    location: "Erlangen, Germany"
+    sites: ["indeed", "linkedin", "google"]
+    results_wanted: 50
+    distance_km: 50
+    enabled: true
+
+  - term: "Working Student"
+    location: "Munich, Germany"
+    sites: ["indeed", "linkedin", "google"]
+    results_wanted: 30
+    enabled: true
+
+  - term: "Student Assistant"
+    location: "Erlangen, Germany"
+    sites: ["indeed", "google"]
+    results_wanted: 20
+    distance_km: 30
+    enabled: true
