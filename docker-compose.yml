@@ -1,0 +1,19 @@
+services:
+  job-search:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./reports:/app/reports
+      - ./output:/app/output
+      - ./logs:/app/logs
+      - ./cv.md:/app/cv.md
+      - ./config:/app/config
+    restart: unless-stopped
+    # Run full pipeline every 6 hours
+    command: >
+      sh -c "while true; do
+        python run_all.py;
+        echo 'Next scan in 6 hours...';
+        sleep 21600;
+      done"
