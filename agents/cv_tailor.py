@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from .openrouter_client import OpenRouterClient
+from .smart_router import SmartRouter
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class CVTailor:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.client = OpenRouterClient()
+        self.client = SmartRouter()
         self.cv_content = self._load_cv()
 
     def _load_cv(self) -> str:
@@ -79,7 +79,7 @@ class CVTailor:
             f"**Job Description:**\n{description}"
         )
 
-        response = self.client.chat(
+        response = self.client.generate(
             system_prompt=system,
             user_prompt=user,
             temperature=0.3,
