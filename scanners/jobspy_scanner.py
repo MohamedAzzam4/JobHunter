@@ -9,6 +9,15 @@ import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
+# numpy must be imported BEFORE jobspy to suppress floating-point
+# exception traps that cause "longdouble infinity to integer" crashes
+# on Python 3.14 + numpy 2.4 (https://github.com/numpy/numpy/issues/...)
+try:
+    import numpy as np
+    np.seterr(all="ignore")
+except ImportError:
+    pass
+
 from .base import BaseScanner, JobPosting, ScanResult
 
 logger = logging.getLogger(__name__)
@@ -56,6 +65,20 @@ class JobSpyScanner(BaseScanner):
 
     def _run_search(self, search_config: dict) -> list[JobPosting]:
         """Run a single JobSpy search (synchronous, runs in thread)."""
+        term = search_config.get("term", "Working Student")
+        location = search_config.get("location", "Erlangen, Germany")
+
+        try:
+            return self._do_search(search_config)
+        except BaseException as e:
+            self.logger.warning(
+                f"JobSpy search '{term}' in '{location}' failed: "
+                f"{type(e).__name__}: {e}"
+            )
+            return []
+
+    def _do_search(self, search_config: dict) -> list[JobPosting]:
+        """Inner search logic — separated so errors are always caught."""
         try:
             from jobspy import scrape_jobs
         except ImportError:
@@ -86,12 +109,7 @@ class JobSpyScanner(BaseScanner):
         if distance_km:
             kwargs["distance"] = distance_km
 
-        try:
-            df = scrape_jobs(**kwargs)
-        except Exception as e:
-            self.logger.warning(f"scrape_jobs raised: {e}")
-            # Return empty rather than crashing — LinkedIn blocks are common
-            return []
+        df = scrape_jobs(**kwargs)
 
         if df is None or df.empty:
             self.logger.info(f"No results for '{term}' in '{location}'")
