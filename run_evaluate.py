@@ -147,6 +147,8 @@ async def evaluate_job(
                     job["title"] = cached["title"]
                 if job.get("company") in ("Unknown", "") and cached.get("company"):
                     job["company"] = cached["company"]
+                if not job.get("date_posted") and cached.get("date_posted"):
+                    job["date_posted"] = cached["date_posted"]
                 logger.info("JD loaded from cache (%d chars)", len(job["description"]))
 
     if not job.get("description"):
@@ -197,6 +199,10 @@ async def evaluate_job(
     if not job.get("title") or job["title"] == "Unknown":
         job["title"] = evaluation.get("title", "Unknown")
 
+    # Pass date_posted to evaluation for Telegram display
+    if job.get("date_posted"):
+        evaluation["date_posted"] = job["date_posted"]
+
     logger.info(
         f"Score: {score}/5 | Company: {job['company']} | "
         f"Recommendation: {evaluation.get('recommendation')} | "
@@ -245,6 +251,10 @@ async def evaluate_job(
         # Send CV via Telegram (PDF if available, otherwise markdown)
         send_path = pdf_path or evaluation.get("cv_path")
         telegram.notify_cv_generated(evaluation, send_path)
+
+        # Send cover letter via Telegram
+        if evaluation.get("cover_letter_path"):
+            telegram.notify_cover_letter(evaluation, evaluation["cover_letter_path"])
     else:
         logger.info(f"Score {score} < {threshold} -> Skipping CV/cover letter generation")
         # Log below-threshold for review

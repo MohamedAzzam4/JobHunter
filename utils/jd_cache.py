@@ -41,7 +41,7 @@ class JDCache:
             return entry
         return None
 
-    def put(self, url: str, description: str, title: str = "", company: str = ""):
+    def put(self, url: str, description: str, title: str = "", company: str = "", date_posted: str = ""):
         """Cache a JD. Only stores if description is non-empty."""
         if not description or not url:
             return
@@ -49,6 +49,7 @@ class JDCache:
             "description": description[:15000],
             "title": title,
             "company": company,
+            "date_posted": date_posted,
         }
 
     def save(self):

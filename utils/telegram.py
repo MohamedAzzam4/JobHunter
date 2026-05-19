@@ -5,8 +5,8 @@ Sends job evaluation results and generated CVs to your Telegram chat.
 Uses raw HTTP (httpx) — no extra bot framework needed.
 
 Messages:
-- Every evaluated job: score + title + company + link
-- High-scoring jobs: full evaluation + CV PDF attachment
+- Every evaluated job: score + title + company + date posted + link
+- High-scoring jobs: full evaluation + CV PDF + cover letter attachments
 """
 
 import logging
@@ -102,6 +102,7 @@ class TelegramNotifier:
         recommendation = evaluation.get("recommendation", "?")
         german = "Yes" if evaluation.get("german_required") else "No"
         summary = evaluation.get("summary", "")
+        date_posted = evaluation.get("date_posted", "")
 
         # Score emoji
         if isinstance(score, (int, float)):
@@ -121,15 +122,17 @@ class TelegramNotifier:
             f"<b>{company}</b> — {title}\n"
             f"German required: {german}\n"
         )
+        if date_posted:
+            text += f"📅 Posted: {date_posted}\n"
         if summary:
             text += f"\n{summary}\n"
         if url:
-            text += f"\n<a href=\"{url}\">View Job</a>"
+            text += f'\n<a href="{url}">View Job</a>'
 
         return self.send_message(text)
 
     def notify_cv_generated(self, evaluation: dict, pdf_path: str | None = None) -> bool:
-        """Notify that a CV + cover letter were generated, optionally attach PDF."""
+        """Notify that a CV was generated, optionally attach PDF."""
         score = evaluation.get("global_score", "?")
         company = evaluation.get("company", "Unknown")
         title = evaluation.get("title", "Unknown")
@@ -143,3 +146,14 @@ class TelegramNotifier:
             return self.send_document(pdf_path, caption)
         else:
             return self.send_message(caption)
+
+    def notify_cover_letter(self, evaluation: dict, cover_path: str | None = None) -> bool:
+        """Send the cover letter file via Telegram."""
+        if not cover_path or not Path(cover_path).exists():
+            return False
+
+        company = evaluation.get("company", "Unknown")
+        title = evaluation.get("title", "Unknown")
+        caption = f"✉️ Cover Letter\n{company} — {title}"
+
+        return self.send_document(cover_path, caption)
