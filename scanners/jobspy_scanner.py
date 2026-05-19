@@ -99,38 +99,53 @@ class JobSpyScanner(BaseScanner):
 
         jobs = []
         for _, row in df.iterrows():
-            # Normalize URL — jobspy sometimes returns NaN
-            url = str(row.get("job_url", "")) if row.get("job_url") is not None else ""
-            if not url or url == "nan":
+            try:
+                # Normalize URL — jobspy sometimes returns NaN
+                url = str(row.get("job_url", "")) if row.get("job_url") is not None else ""
+                if not url or url == "nan":
+                    continue
+
+                title = str(row.get("title", "")) if row.get("title") is not None else ""
+                # JobSpy uses "company" not "company_name"
+                company = str(row.get("company", "")) if row.get("company") is not None else ""
+                if company == "nan":
+                    company = ""
+                location_str = str(row.get("location", "")) if row.get("location") is not None else ""
+                description = str(row.get("description", "")) if row.get("description") is not None else ""
+                date_posted = str(row.get("date_posted", "")) if row.get("date_posted") is not None else ""
+                if date_posted == "NaT" or date_posted == "nan":
+                    date_posted = ""
+                salary = ""
+
+                # Try to get salary info — guard against numpy inf/NaN
+                try:
+                    import math
+                    min_sal = row.get("min_amount")
+                    max_sal = row.get("max_amount")
+                    if (min_sal is not None and max_sal is not None
+                            and not math.isnan(float(min_sal))
+                            and not math.isinf(float(min_sal))):
+                        currency = row.get("currency", "EUR")
+                        salary = f"{currency} {min_sal}-{max_sal}"
+                except (ValueError, TypeError, OverflowError):
+                    salary = ""
+
+                # Determine source site
+                site = str(row.get("site", "jobspy"))
+
+                jobs.append(JobPosting(
+                    title=title,
+                    url=url,
+                    company=company,
+                    location=location_str,
+                    date_posted=date_posted,
+                    source=f"jobspy-{site}",
+                    description=description[:5000] if description else "",
+                    salary=salary,
+                ))
+            except Exception as e:
+                self.logger.debug(f"Skipping row due to error: {e}")
                 continue
-
-            title = str(row.get("title", "")) if row.get("title") is not None else ""
-            company = str(row.get("company_name", "")) if row.get("company_name") is not None else ""
-            location_str = str(row.get("location", "")) if row.get("location") is not None else ""
-            description = str(row.get("description", "")) if row.get("description") is not None else ""
-            date_posted = str(row.get("date_posted", "")) if row.get("date_posted") is not None else ""
-            salary = ""
-
-            # Try to get salary info
-            min_sal = row.get("min_amount")
-            max_sal = row.get("max_amount")
-            if min_sal and max_sal and str(min_sal) != "nan":
-                currency = row.get("currency", "EUR")
-                salary = f"{currency} {min_sal}-{max_sal}"
-
-            # Determine source site
-            site = str(row.get("site", "jobspy"))
-
-            jobs.append(JobPosting(
-                title=title,
-                url=url,
-                company=company,
-                location=location_str,
-                date_posted=date_posted,
-                source=f"jobspy-{site}",
-                description=description[:5000] if description else "",
-                salary=salary,
-            ))
 
         self.logger.info(
             f"Got {len(jobs)} results for '{term}' in '{location}'"
