@@ -34,9 +34,12 @@ class JDCache:
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(self._cache, f, ensure_ascii=False, indent=1)
 
-    def get(self, url: str) -> str | None:
-        """Get cached JD text for a URL, or None."""
-        return self._cache.get(url)
+    def get(self, url: str) -> dict | None:
+        """Get cached JD for a URL, or None if not found or too short."""
+        entry = self._cache.get(url)
+        if entry and len(entry.get("description", "")) > 50:
+            return entry
+        return None
 
     def put(self, url: str, description: str, title: str = "", company: str = ""):
         """Cache a JD. Only stores if description is non-empty."""

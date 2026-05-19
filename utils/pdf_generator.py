@@ -32,20 +32,48 @@ if sys.platform == "win32":
             break
 
 
-def _md_to_html_cv(md_content: str, candidate_name: str = "", contact: str = "") -> str:
+def _strip_bold(text: str) -> str:
+    """Remove markdown bold markers: **text** -> text"""
+    return re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+
+
+def _md_inline(text: str) -> str:
+    """Convert inline markdown (bold, italic, links) to HTML."""
+    # **bold** -> <strong>
+    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+    # *italic* -> <em>
+    text = re.sub(r"\*(.+?)\*", r"<em>\1</em>", text)
+    # [text](url) -> <a href>
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
+    # Clean up escaped characters
+    text = text.replace("\\+", "+").replace("\\&", "&")
+    return text
+
+
+def _is_header_line(stripped: str) -> bool:
+    """Check if a line is part of the CV header (name, contact, etc.)
+    These are skipped since the PDF template renders its own header."""
+    header_prefixes = [
+        "**AI Engineer", "**Location:", "**Email:", "**Phone:",
+        "**Links:", "**Military Status:", "AI Engineer",
+    ]
+    for prefix in header_prefixes:
+        if stripped.startswith(prefix):
+            return True
+    return False
+
+
+def _md_to_html_cv(md_content: str, candidate_name: str = "", subtitle: str = "",
+                    contact: str = "", linkedin: str = "", github: str = "") -> str:
     """Convert tailored CV markdown to ATS-friendly HTML.
     
-    Handles common markdown patterns:
-    - # Title -> header section
-    - ## Section -> section headers
-    - ### Sub-section -> item headers
-    - - bullet -> <li>
-    - **bold** -> <strong>
+    The header (name, subtitle, contact, links) is rendered by the template.
+    The markdown body sections are converted to HTML.
     """
     lines = md_content.strip().split("\n")
     html_parts = []
     in_list = False
-    current_section = ""
+    header_done = False
 
     for line in lines:
         stripped = line.strip()
@@ -56,11 +84,12 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", contact: str = "")
                 in_list = False
             continue
 
-        # H1 - Name/Title (skip if we already have it in header)
+        # H1 - Name (skip — rendered by template header)
         if stripped.startswith("# "):
-            title_text = stripped[2:].strip()
-            if not candidate_name:
-                candidate_name = title_text
+            continue
+
+        # Skip header/contact lines before first section
+        if not header_done and _is_header_line(stripped):
             continue
 
         # H2 - Section header
@@ -68,8 +97,9 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", contact: str = "")
             if in_list:
                 html_parts.append("</ul>")
                 in_list = False
-            current_section = stripped[3:].strip()
-            html_parts.append(f'<div class="section"><h2 class="section-title">{current_section}</h2>')
+            header_done = True
+            section_name = _strip_bold(stripped[3:].strip())
+            html_parts.append(f'<div class="section"><h2 class="section-title">{section_name}</h2>')
             continue
 
         # H3 - Sub-section / company name
@@ -101,6 +131,16 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", contact: str = "")
 
     body = "\n".join(html_parts)
 
+    # Build links line for header
+    links_html = ""
+    link_parts = []
+    if linkedin:
+        link_parts.append(f'<a href="{linkedin}" style="color:#2c3e50;">LinkedIn</a>')
+    if github:
+        link_parts.append(f'<a href="{github}" style="color:#2c3e50;">GitHub</a>')
+    if link_parts:
+        links_html = f'<p class="contact">{" | ".join(link_parts)}</p>'
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -130,9 +170,19 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", contact: str = "")
             text-transform: uppercase;
             margin: 0;
         }}
+        .subtitle {{
+            font-size: 12pt;
+            color: #555;
+            margin: 5px 0;
+        }}
         .contact {{
             font-size: 9pt;
             color: #666;
+            margin: 2px 0;
+        }}
+        .contact a {{
+            color: #2c3e50;
+            text-decoration: none;
         }}
         .section {{
             margin-bottom: 12px;
@@ -162,40 +212,27 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", contact: str = "")
 <body>
     <div class="header">
         <h1 class="name">{candidate_name}</h1>
+        <p class="subtitle">{subtitle}</p>
         <p class="contact">{contact}</p>
+        {links_html}
     </div>
     {body}
 </body>
 </html>"""
 
 
-def _md_inline(text: str) -> str:
-    """Convert inline markdown (bold, italic, links) to HTML."""
-    # **bold** -> <strong>
-    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
-    # *italic* -> <em>
-    text = re.sub(r"\*(.+?)\*", r"<em>\1</em>", text)
-    # [text](url) -> <a href>
-    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
-    return text
-
-
-def _load_candidate_info() -> tuple[str, str]:
-    """Load candidate name and contact from profile.yml."""
+def _load_candidate_info() -> dict:
+    """Load candidate info from profile.yml."""
     try:
         import yaml
         profile_path = Path("config/profile.yml")
         if profile_path.exists():
             with open(profile_path, "r", encoding="utf-8") as f:
                 profile = yaml.safe_load(f) or {}
-            c = profile.get("candidate", {})
-            name = c.get("full_name", "Candidate")
-            parts = [c.get("location", ""), c.get("email", ""), c.get("phone", "")]
-            contact = " | ".join(p for p in parts if p)
-            return name, contact
+            return profile.get("candidate", {})
     except Exception:
         pass
-    return "Candidate", ""
+    return {}
 
 
 def generate_cv_pdf(
@@ -215,10 +252,16 @@ def generate_cv_pdf(
     Returns:
         Dict with success status and path
     """
-    if candidate_name is None or contact is None:
-        _name, _contact = _load_candidate_info()
-        candidate_name = candidate_name or _name
-        contact = contact or _contact
+    candidate = _load_candidate_info()
+    if not candidate_name:
+        candidate_name = candidate.get("full_name", "Candidate")
+    if not contact:
+        parts = [candidate.get("location", ""), candidate.get("email", ""), candidate.get("phone", "")]
+        contact = " | ".join(p for p in parts if p)
+    subtitle = candidate.get("subtitle", "AI Engineer | AI Agent Builder | Working-Student Candidate")
+    linkedin = candidate.get("linkedin", "")
+    github = candidate.get("github", "")
+
     try:
         from weasyprint import HTML
     except ImportError:
@@ -228,7 +271,10 @@ def generate_cv_pdf(
         }
 
     try:
-        html = _md_to_html_cv(md_content, candidate_name, contact)
+        html = _md_to_html_cv(
+            md_content, candidate_name, subtitle,
+            contact, linkedin, github,
+        )
         
         # Ensure output directory exists
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)

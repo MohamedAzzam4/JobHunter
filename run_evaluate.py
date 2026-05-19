@@ -168,9 +168,17 @@ async def evaluate_job(
 
         if result.success:
             job["description"] = result.text
-            # If title/company are Unknown (--url mode), try to extract from page
-            if job.get("title") == "Unknown" and result.title:
-                job["title"] = result.title
+            # Extract company + clean title from page title (LinkedIn: "Company hiring Role")
+            if result.title:
+                hiring_match = re.match(r"^(.+?)\s+hiring\s+(.+)", result.title)
+                if hiring_match:
+                    if job.get("company") in ("Unknown", ""):
+                        job["company"] = hiring_match.group(1).strip()
+                        logger.info(f"Company from page title: {job['company']}")
+                    if job.get("title") in ("Unknown", ""):
+                        job["title"] = hiring_match.group(2).strip()
+                elif job.get("title") in ("Unknown", ""):
+                    job["title"] = result.title
         else:
             logger.warning(f"Could not fetch JD: {result.error}")
 

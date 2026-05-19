@@ -183,9 +183,9 @@ class CVTailor:
         # Reassemble: header + tailored sections + fixed sections
         final_cv = self._assemble_cv(tailored_body)
 
-        # Generate filename
+        # Generate filename using short_name from profile.yml
         candidate = self.profile.get("candidate", {})
-        candidate_name = candidate.get("full_name", "CV")
+        candidate_name = candidate.get("short_name", candidate.get("full_name", "CV"))
         name_slug = re.sub(r"[^a-z0-9]+", "-", candidate_name.lower()).strip("-")
         company_slug = re.sub(r"[^a-z0-9]+", "-", company.lower()).strip("-")[:20]
         role_slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:25]

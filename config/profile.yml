@@ -1,5 +1,7 @@
 candidate:
   full_name: "Template User"
+  short_name: "Template User"
+  subtitle: "AI Engineer | AI Agent Builder | Working-Student Candidate"
   email: "template@example.com"
   phone: "+1 555 555 5555"
   location: "TemplateCity, Country"
@@ -7,7 +9,7 @@ candidate:
   degree_current: "M.Sc. Template Technologies"
   degree_bachelor: "B.Sc. Engineering (Honors)"
   linkedin: "https://linkedin.com/in/mohamedazzam"
-  github: "https://github.com/mohamedazzam"
+  github: "https://github.com/template-user"
 
 target_roles:
   primary:
