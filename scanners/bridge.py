@@ -114,6 +114,7 @@ class PipelineBridge:
                         desc,
                         title=job.get("title", ""),
                         company=job.get("company", ""),
+                        date_posted=str(job.get("date_posted", "")),
                     )
             self.jd_cache.save()
 

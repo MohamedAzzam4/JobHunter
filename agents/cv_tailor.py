@@ -90,13 +90,13 @@ def _split_cv_sections(cv_text: str) -> tuple[str, dict[str, str]]:
     return "\n".join(header_lines).strip(), sections
 
 
-# Sections the AI is allowed to modify
+# Sections the AI is allowed to modify (reorder, rephrase, remove items)
 TAILORABLE_SECTIONS = {
-    "OBJECTIVE", "TECHNICAL SKILLS", "EXPERIENCE", "PROJECTS",
+    "TECHNICAL SKILLS", "EXPERIENCE", "PROJECTS",
 }
-# Sections that are NEVER modified
+# Sections that are NEVER modified — kept exactly as in cv.md
 FIXED_SECTIONS = {
-    "EDUCATION", "CERTIFICATIONS & TRAINING", "LANGUAGES",
+    "OBJECTIVE", "EDUCATION", "CERTIFICATIONS & TRAINING", "LANGUAGES",
 }
 
 
@@ -205,14 +205,19 @@ class CVTailor:
         }
 
     def _assemble_cv(self, tailored_body: str) -> str:
-        """Reassemble the full CV: header + AI-tailored sections + fixed sections."""
+        """Reassemble the full CV: header + fixed OBJECTIVE + AI sections + fixed sections."""
         parts = [self.header, ""]
 
-        # Add AI-tailored sections (OBJECTIVE, SKILLS, EXPERIENCE, PROJECTS)
+        # Add OBJECTIVE (fixed — not modified by AI)
+        if "OBJECTIVE" in self.sections:
+            parts.append(self.sections["OBJECTIVE"])
+            parts.append("")
+
+        # Add AI-tailored sections (SKILLS, EXPERIENCE, PROJECTS)
         parts.append(tailored_body.strip())
         parts.append("")
 
-        # Add fixed sections (EDUCATION, CERTIFICATIONS, LANGUAGES)
+        # Add remaining fixed sections (EDUCATION, CERTIFICATIONS, LANGUAGES)
         for name in ["EDUCATION", "CERTIFICATIONS & TRAINING", "LANGUAGES"]:
             if name in self.sections:
                 parts.append(self.sections[name])
