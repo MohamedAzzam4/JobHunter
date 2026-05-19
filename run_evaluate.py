@@ -182,8 +182,16 @@ async def evaluate_job(
         return evaluation
 
     score = evaluation.get("global_score", 0)
+
+    # Update job dict with AI-extracted company/title if originally missing
+    if not job.get("company") or job["company"] == "Unknown":
+        job["company"] = evaluation.get("company", "Unknown")
+    if not job.get("title") or job["title"] == "Unknown":
+        job["title"] = evaluation.get("title", "Unknown")
+
     logger.info(
-        f"Score: {score}/5 | Recommendation: {evaluation.get('recommendation')} | "
+        f"Score: {score}/5 | Company: {job['company']} | "
+        f"Recommendation: {evaluation.get('recommendation')} | "
         f"German required: {evaluation.get('german_required')}"
     )
 

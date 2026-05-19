@@ -8,7 +8,7 @@
 
 **Phone:** \+49 152 5617 2336 | \+20 109 779 4098
 
-**Links:** [LinkedIn](#bookmark=id.fym18xuvblk) | [GitHub](#bookmark=id.fym18xuvblk)
+**Links:** [LinkedIn](https://linkedin.com/in/mohamedazzam) | [GitHub](https://github.com/MohamedAzzam4)
 
 **Military Status:** Exempted (Final Exemption)
 
