@@ -180,23 +180,45 @@ def _md_inline(text: str) -> str:
     return text
 
 
+def _load_candidate_info() -> tuple[str, str]:
+    """Load candidate name and contact from profile.yml."""
+    try:
+        import yaml
+        profile_path = Path("config/profile.yml")
+        if profile_path.exists():
+            with open(profile_path, "r", encoding="utf-8") as f:
+                profile = yaml.safe_load(f) or {}
+            c = profile.get("candidate", {})
+            name = c.get("full_name", "Candidate")
+            parts = [c.get("location", ""), c.get("email", ""), c.get("phone", "")]
+            contact = " | ".join(p for p in parts if p)
+            return name, contact
+    except Exception:
+        pass
+    return "Candidate", ""
+
+
 def generate_cv_pdf(
     md_content: str,
     output_path: str,
-    candidate_name: str = "Mohamed Abd Elrhman Azzam",
-    contact: str = "Erlangen, Germany | mohammed.abd.elrhman.azzam@gmail.com | +49 152 5617 2336",
+    candidate_name: str | None = None,
+    contact: str | None = None,
 ) -> dict:
     """Generate a PDF CV from markdown content.
     
     Args:
         md_content: Tailored CV in markdown format
         output_path: Where to save the PDF
-        candidate_name: Name for the header
-        contact: Contact line for the header
+        candidate_name: Name for the header (loaded from profile.yml if not given)
+        contact: Contact line for the header (loaded from profile.yml if not given)
         
     Returns:
         Dict with success status and path
     """
+    if candidate_name is None or contact is None:
+        _name, _contact = _load_candidate_info()
+        candidate_name = candidate_name or _name
+        contact = contact or _contact
     try:
         from weasyprint import HTML
     except ImportError:

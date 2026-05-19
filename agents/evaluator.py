@@ -57,6 +57,8 @@ Score each dimension 1-5, then provide a weighted global score.
 You MUST respond with ONLY a JSON object in this exact format (no markdown, no explanation outside the JSON):
 ```json
 {{
+  "company_name": "<extract company name from the JD>",
+  "job_title": "<extract the exact job title from the JD>",
   "scores": {{
     "skills_match": <1-5>,
     "education_match": <1-5>,
@@ -188,9 +190,11 @@ class Evaluator:
                 "title": title,
             }
 
-        # Add metadata
-        evaluation["company"] = company
-        evaluation["title"] = title
+        # Add metadata — use AI-extracted names when original is empty
+        ai_company = evaluation.get("company_name", "")
+        ai_title = evaluation.get("job_title", "")
+        evaluation["company"] = company if company else (ai_company or "Unknown")
+        evaluation["title"] = title if title else (ai_title or "Unknown")
         evaluation["url"] = url
         evaluation["model_used"] = response.model_used
         evaluation["evaluated_at"] = datetime.now().isoformat()
