@@ -38,14 +38,24 @@ Score each dimension 1-5, then provide a weighted global score.
 - The candidate speaks English C1 and German A2 (basic)
 - A job posting WRITTEN in German does NOT automatically mean German is required for the role
 - Many German companies post in German but accept English-speaking employees
-- ONLY mark german_required=true if the JD EXPLICITLY states one of these:
-  - "Fliessende Deutschkenntnisse" / "Deutsch fliessend" / "verhandlungssicher Deutsch"
+
+### Classify german_level_required as one of: "none", "A1-A2", "B1", "B2+"
+- **"B2+"** = german_required=true, Language score=1. Triggers:
+  - "Fließende Deutschkenntnisse" / "Deutsch fließend" / "verhandlungssicher Deutsch"
   - "Deutschkenntnisse mindestens B2/C1/C2"
   - "Deutsche Sprachkenntnisse erforderlich"
-  - "sehr gute Deutschkenntnisse"
-- If the JD only says "Grundkenntnisse Deutsch" or "Deutsch von Vorteil", that is OK (A2 is enough)
-- If there is NO mention of language requirements, assume English is sufficient -> Language score = 4
-- If English is explicitly mentioned as working language -> Language score = 5
+  - "sehr gute Deutschkenntnisse" / "gute Deutschkenntnisse"
+  - "Deutsch: verhandlungssicher" / "Deutsch: fließend"
+  - ANY generic phrase implying fluency like "excellent German", "good German skills", "sichere Deutschkenntnisse"
+  - If the JD says the working language IS German or requires German for customer/team communication
+- **"B1"** = german_required=true, Language score=2. Triggers:
+  - "Deutschkenntnisse B1" / "mittlere Deutschkenntnisse"
+- **"A1-A2"** = german_required=false, Language score=4. Triggers:
+  - "Grundkenntnisse Deutsch" / "Deutsch von Vorteil" / "German is a plus"
+  - "Deutschkenntnisse A1/A2"
+- **"none"** = german_required=false, Language score=4. Triggers:
+  - No mention of German language requirements at all
+  - English explicitly mentioned as working language → Language score = 5
 
 ## OTHER RULES
 - The candidate is open to ALL working student roles, including non-technical (office, admin, data entry)
@@ -71,6 +81,7 @@ You MUST respond with ONLY a JSON object in this exact format (no markdown, no e
   "match_highlights": ["<skill/experience that matches>", "..."],
   "gaps": ["<missing requirement>", "..."],
   "german_required": <true/false>,
+  "german_level_required": "<none|A1-A2|B1|B2+>",
   "recommendation": "<apply/consider/skip>",
   "reasoning": "<2-3 sentences explaining the score>"
 }}

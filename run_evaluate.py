@@ -203,14 +203,35 @@ async def evaluate_job(
     if job.get("date_posted"):
         evaluation["date_posted"] = job["date_posted"]
 
-    logger.info(
-        f"Score: {score}/5 | Company: {job['company']} | "
-        f"Recommendation: {evaluation.get('recommendation')} | "
-        f"German required: {evaluation.get('german_required')}"
-    )
+    # --- German B2+ Auto-Rejection ---
+    german_level = evaluation.get("german_level_required", "none")
+    german_required = evaluation.get("german_required", False)
+
+    if german_level in ("B2+", "B1") or german_required:
+        original_score = score
+        score = 0
+        evaluation["global_score"] = 0
+        evaluation["recommendation"] = "skip_german"
+        logger.info(
+            f"🇩🇪 AUTO-SKIP: German {german_level} required | "
+            f"Original score: {original_score}/5 | Company: {job['company']}"
+        )
+    else:
+        logger.info(
+            f"Score: {score}/5 | Company: {job['company']} | "
+            f"Recommendation: {evaluation.get('recommendation')} | "
+            f"German: {german_level}"
+        )
 
     # 3. Send Telegram notification for every evaluation
     telegram.notify_evaluation(evaluation)
+
+    # 3b. Update Excel database
+    try:
+        from utils.excel_export import update_job_entry
+        update_job_entry(evaluation)
+    except Exception as e:
+        logger.debug(f"Excel export skipped: {e}")
 
     # 4. Generate CV + Cover Letter if score >= threshold
     pdf_path = None
@@ -229,6 +250,7 @@ async def evaluate_job(
                 pdf_result = generate_cv_pdf(
                     md_content=cv_result.get("content", ""),
                     output_path=pdf_out,
+                    subtitle=cv_result.get("subtitle"),
                 )
                 if pdf_result.get("success"):
                     pdf_path = pdf_result["output_path"]
@@ -256,7 +278,10 @@ async def evaluate_job(
         if evaluation.get("cover_letter_path"):
             telegram.notify_cover_letter(evaluation, evaluation["cover_letter_path"])
     else:
-        logger.info(f"Score {score} < {threshold} -> Skipping CV/cover letter generation")
+        if evaluation.get("recommendation") == "skip_german":
+            logger.info(f"German required -> Skipping CV/cover letter generation")
+        else:
+            logger.info(f"Score {score} < {threshold} -> Skipping CV/cover letter generation")
         # Log below-threshold for review
         log_below_threshold(evaluation, threshold)
 

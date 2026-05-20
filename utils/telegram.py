@@ -100,12 +100,14 @@ class TelegramNotifier:
         title = evaluation.get("title", "Unknown")
         url = evaluation.get("url", "")
         recommendation = evaluation.get("recommendation", "?")
-        german = "Yes" if evaluation.get("german_required") else "No"
+        german_level = evaluation.get("german_level_required", "unknown")
         summary = evaluation.get("summary", "")
         date_posted = evaluation.get("date_posted", "")
 
         # Score emoji
-        if isinstance(score, (int, float)):
+        if recommendation == "skip_german":
+            icon = "🇩🇪"
+        elif isinstance(score, (int, float)):
             if score >= 4.0:
                 icon = "🟢"
             elif score >= 3.5:
@@ -120,7 +122,7 @@ class TelegramNotifier:
         text = (
             f"{icon} <b>{score}/5</b> — {recommendation.upper()}\n"
             f"<b>{company}</b> — {title}\n"
-            f"German required: {german}\n"
+            f"German: {german_level}\n"
         )
         if date_posted:
             text += f"📅 Posted: {date_posted}\n"
