@@ -2,12 +2,11 @@
 PDF CV generator using WeasyPrint.
 
 Converts a tailored CV (markdown) into a clean, ATS-friendly PDF.
-Much lighter than Playwright (~5MB vs ~200MB Chromium).
-
 Template based on user's CV_Example.py style:
 - Arial font, A4 page
-- Clean table layout (ATS-safe, no flexbox/float)
+- Clean table layout for dates (ATS-safe, no flexbox/float)
 - Section headers with underline
+- Dates right-aligned on the same line as titles
 """
 
 import logging
@@ -30,6 +29,19 @@ if sys.platform == "win32":
             os.environ["WEASYPRINT_DLL_DIRECTORIES"] = _p
             logger.debug("WeasyPrint DLL path set to: %s", _p)
             break
+
+
+# ── Date pattern detection ──────────────────────────────────────────────
+# Matches italic date patterns like: *Apr 2026 – Apr 2028 (Expected)*
+# or *2024 – Present* or *Sept 2020 – July 2025*
+DATE_PATTERN = re.compile(
+    r"^\*(.+(?:\d{4}).+)\*\s*$"
+)
+
+# Matches a title+date on the same line: **Title** *Date*
+TITLE_DATE_INLINE = re.compile(
+    r"^\*\*(.+?)\*\*\s+\*(.+?)\*\s*$"
+)
 
 
 def _strip_bold(text: str) -> str:
@@ -67,15 +79,18 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", subtitle: str = ""
                     contact: str = "", linkedin: str = "", github: str = "") -> str:
     """Convert tailored CV markdown to ATS-friendly HTML.
     
-    The header (name, subtitle, contact, links) is rendered by the template.
-    The markdown body sections are converted to HTML.
+    Uses table layout for title+date pairs (matching CV_Example.py style).
+    Dates appear right-aligned on the same line as titles/companies.
     """
     lines = md_content.strip().split("\n")
     html_parts = []
     in_list = False
+    in_section = False
     header_done = False
+    # Buffer to detect title+date pairs across consecutive lines
+    pending_title = None
 
-    for line in lines:
+    for i, line in enumerate(lines):
         stripped = line.strip()
 
         if not stripped:
@@ -92,23 +107,100 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", subtitle: str = ""
         if not header_done and _is_header_line(stripped):
             continue
 
+        # Skip subtitle line in header (we render it from the template)
+        if not header_done and stripped.startswith("**") and "|" in stripped and "Candidate" in stripped:
+            continue
+
         # H2 - Section header
         if stripped.startswith("## "):
             if in_list:
                 html_parts.append("</ul>")
                 in_list = False
+            if in_section:
+                html_parts.append("</div>")
             header_done = True
+            in_section = True
             section_name = _strip_bold(stripped[3:].strip())
             html_parts.append(f'<div class="section"><h2 class="section-title">{section_name}</h2>')
+            pending_title = None
             continue
 
-        # H3 - Sub-section / company name
+        # Check for inline title+date: **CRM Developer** *2021 – 2025*
+        inline_match = TITLE_DATE_INLINE.match(stripped)
+        if inline_match:
+            if in_list:
+                html_parts.append("</ul>")
+                in_list = False
+            title_text = inline_match.group(1)
+            date_text = inline_match.group(2)
+            html_parts.append(
+                f'<table class="item-header"><tr>'
+                f'<td>{_md_inline(title_text)}</td>'
+                f'<td class="date">{date_text}</td>'
+                f'</tr></table>'
+            )
+            pending_title = None
+            continue
+
+        # Bold title line (potential title that has a date on the next line)
+        if stripped.startswith("**") and stripped.endswith("**"):
+            if in_list:
+                html_parts.append("</ul>")
+                in_list = False
+            title_text = stripped.strip("* ").strip()
+            # Look ahead for a date line (italic on next non-empty line)
+            next_lines = _peek_ahead(lines, i + 1)
+            if next_lines.get("date"):
+                # Title with date on next line — buffer it
+                pending_title = title_text
+                continue
+            else:
+                # Standalone bold line (no date following)
+                html_parts.append(
+                    f'<div style="font-weight:bold;font-size:11pt;margin-top:5px;">'
+                    f'{_md_inline(title_text)}</div>'
+                )
+                pending_title = None
+                continue
+
+        # Italic line — could be a date or a subtitle
+        if stripped.startswith("*") and stripped.endswith("*") and not stripped.startswith("* "):
+            inner = stripped.strip("*").strip()
+
+            # If we have a pending title, this is the date line
+            if pending_title:
+                html_parts.append(
+                    f'<table class="item-header"><tr>'
+                    f'<td>{_md_inline(pending_title)}</td>'
+                    f'<td class="date">{inner}</td>'
+                    f'</tr></table>'
+                )
+                pending_title = None
+                continue
+
+            # Check if it looks like a company/location subtitle
+            # (contains a location or company separator like comma)
+            html_parts.append(f'<div class="item-subheader">{_md_inline(inner)}</div>')
+            continue
+
+        # Flush pending title if it wasn't followed by a date
+        if pending_title:
+            html_parts.append(
+                f'<div style="font-weight:bold;font-size:11pt;margin-top:5px;">'
+                f'{_md_inline(pending_title)}</div>'
+            )
+            pending_title = None
+
+        # H3 - Sub-section
         if stripped.startswith("### "):
             if in_list:
                 html_parts.append("</ul>")
                 in_list = False
             sub = stripped[4:].strip()
-            html_parts.append(f'<div style="font-weight:bold;font-size:11pt;margin-top:5px;">{_md_inline(sub)}</div>')
+            html_parts.append(
+                f'<div style="font-weight:bold;font-size:11pt;margin-top:5px;">'
+                f'{_md_inline(sub)}</div>'
+            )
             continue
 
         # Bullet point
@@ -126,8 +218,16 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", subtitle: str = ""
             in_list = False
         html_parts.append(f'<p style="font-size:10pt;margin:2px 0;">{_md_inline(stripped)}</p>')
 
+    # Flush pending
+    if pending_title:
+        html_parts.append(
+            f'<div style="font-weight:bold;font-size:11pt;margin-top:5px;">'
+            f'{_md_inline(pending_title)}</div>'
+        )
     if in_list:
         html_parts.append("</ul>")
+    if in_section:
+        html_parts.append("</div>")
 
     body = "\n".join(html_parts)
 
@@ -195,6 +295,30 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", subtitle: str = ""
             margin-bottom: 8px;
             text-transform: uppercase;
         }}
+        /* ── ATS FIX: table layout for title+date pairs ── */
+        .item-header {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 5px;
+        }}
+        .item-header td {{
+            padding: 0;
+            font-weight: bold;
+            font-size: 11pt;
+            vertical-align: middle;
+        }}
+        .item-header .date {{
+            text-align: right;
+            font-weight: normal;
+            font-style: italic;
+            font-size: 10pt;
+            white-space: nowrap;
+        }}
+        .item-subheader {{
+            font-style: italic;
+            font-size: 10pt;
+            color: #555;
+        }}
         ul {{
             margin: 5px 0;
             padding-left: 20px;
@@ -221,6 +345,22 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", subtitle: str = ""
 </html>"""
 
 
+def _peek_ahead(lines: list[str], start: int) -> dict:
+    """Look at the next non-empty line to check if it's a date."""
+    for j in range(start, min(start + 3, len(lines))):
+        stripped = lines[j].strip()
+        if not stripped:
+            continue
+        # Check if it's an italic date line
+        if stripped.startswith("*") and stripped.endswith("*") and not stripped.startswith("* "):
+            inner = stripped.strip("*").strip()
+            # Must contain a year to be a date
+            if re.search(r"\d{4}", inner):
+                return {"date": inner}
+        break
+    return {}
+
+
 def _load_candidate_info() -> dict:
     """Load candidate info from profile.yml."""
     try:
@@ -240,6 +380,7 @@ def generate_cv_pdf(
     output_path: str,
     candidate_name: str | None = None,
     contact: str | None = None,
+    subtitle: str | None = None,
 ) -> dict:
     """Generate a PDF CV from markdown content.
     
@@ -248,6 +389,7 @@ def generate_cv_pdf(
         output_path: Where to save the PDF
         candidate_name: Name for the header (loaded from profile.yml if not given)
         contact: Contact line for the header (loaded from profile.yml if not given)
+        subtitle: Role-specific subtitle (loaded from profile.yml if not given)
         
     Returns:
         Dict with success status and path
@@ -258,7 +400,8 @@ def generate_cv_pdf(
     if not contact:
         parts = [candidate.get("location", ""), candidate.get("email", ""), candidate.get("phone", "")]
         contact = " | ".join(p for p in parts if p)
-    subtitle = candidate.get("subtitle", "AI Engineer | AI Agent Builder | Working-Student Candidate")
+    if not subtitle:
+        subtitle = candidate.get("subtitle", "AI Engineer | AI Agent Builder | Working-Student Candidate")
     linkedin = candidate.get("linkedin", "")
     github = candidate.get("github", "")
 
