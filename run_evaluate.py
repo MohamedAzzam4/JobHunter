@@ -213,7 +213,7 @@ async def evaluate_job(
         evaluation["global_score"] = 0
         evaluation["recommendation"] = "skip_german"
         logger.info(
-            f"🇩🇪 AUTO-SKIP: German {german_level} required | "
+            f"[DE] AUTO-SKIP: German {german_level} required | "
             f"Original score: {original_score}/5 | Company: {job['company']}"
         )
     else:
