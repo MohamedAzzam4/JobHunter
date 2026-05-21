@@ -74,14 +74,14 @@ cp .env.example .env
 
 **`.env` contents:**
 ```env
-# OpenRouter API keys (create free accounts at openrouter.ai)
+# OpenRouter API keys — use keys from different free accounts to increase daily quota
 OpenRouter=sk-or-v1-...
 OpenRouter2=sk-or-v1-...
 OpenRouter3=sk-or-v1-...
 OpenRouter4=sk-or-v1-...
 
-# Google AI Studio (free at aistudio.google.com)
-# Create 2 keys for rotation: Key1 exhausts first, then Key2 takes over
+# Google AI Studio — use keys from different Google accounts to increase daily limit
+# The system rotates to the next key automatically when one hits its rate limit
 GOOGLE_AI_API_KEY=AIza...
 GOOGLE_AI_API_KEY2=AIza...
 
@@ -305,15 +305,15 @@ job_apply/
 
 ## AI Routing Strategy
 
-The system uses a tiered approach to maximize free API quotas:
+The system uses multiple API keys from different free accounts to maximize daily quotas. When one key hits its rate limit, the system automatically rotates to the next.
 
-| Task | Primary Provider | Fallback | Daily Quota |
-|------|-----------------|----------|-------------|
-| **Evaluation** | Google AI Studio (Gemma 4 26B) | Gemma 4 31B → rotate key → OpenRouter | ~1,586/day (86 + 1,500) |
-| **CV Tailoring** | OpenRouter (4-key rotation) | Key1 → Key2 → Key3 → Key4 | ~800/day |
-| **Cover Letter** | OpenRouter (4-key rotation) | Same rotation | ~800/day |
+| Task | Primary Provider | Fallback |
+|------|-----------------|----------|
+| **Evaluation** | Google AI Studio (Gemma 4 26B) | Gemma 4 31B → next key → OpenRouter |
+| **CV Tailoring** | OpenRouter (multi-key rotation) | Key1 → Key2 → Key3 → Key4 |
+| **Cover Letter** | OpenRouter (multi-key rotation) | Same rotation |
 
-**Total: ~3,186 API calls/day for free.**
+> 💡 **The more accounts/keys you add, the higher your daily quota.** Check your limits at [aistudio.google.com](https://aistudio.google.com) and [openrouter.ai](https://openrouter.ai).
 
 ## CV Tailoring Strategy
 

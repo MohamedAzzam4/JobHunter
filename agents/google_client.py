@@ -2,7 +2,8 @@
 Google AI Studio client for Gemma models.
 
 Uses the google-genai SDK for direct access to Google's free tier.
-Free tier: 15 RPM, 1,500 RPD — 10x more than OpenRouter.
+Supports multiple API keys from different accounts to increase daily limits.
+Rotation happens automatically when a key hits its rate limit (429 error).
 
 Used as the PRIMARY model for high-volume evaluation tasks.
 """
