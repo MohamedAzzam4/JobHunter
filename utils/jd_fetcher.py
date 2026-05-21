@@ -62,6 +62,25 @@ def _clean_html_to_text(html: str) -> str:
     return text
 
 
+def _extract_linkedin_jd(html: str) -> str:
+    """Extract job description from LinkedIn's specific HTML structure.
+    
+    LinkedIn renders JD content inside a 'show-more-less-html__markup' div.
+    Extracting from this div directly avoids polluting the JD text with
+    navigation bars, footers, and sidebar content from the full page.
+    
+    Returns:
+        Clean JD text, or empty string if the pattern isn't found.
+    """
+    match = re.search(
+        r'<div class="show-more-less-html__markup[^"]*"[^>]*>(.*?)</div>',
+        html, re.DOTALL | re.IGNORECASE
+    )
+    if not match:
+        return ""
+    return _clean_html_to_text(match.group(1))
+
+
 def _check_expired(text: str, url: str) -> bool:
     """Check if the page content indicates an expired job posting."""
     lower = text.lower()
@@ -141,8 +160,22 @@ async def fetch_jd(url: str) -> FetchResult:
                 return result
 
             html = resp.text
-            text = _clean_html_to_text(html)
             title = _extract_title_from_html(html)
+
+            # For LinkedIn, extract JD from the specific markup div
+            # (avoids polluting text with nav/footer/sidebar noise)
+            if "linkedin.com" in url:
+                linkedin_text = _extract_linkedin_jd(html)
+                if linkedin_text and len(linkedin_text) > 100:
+                    text = linkedin_text
+                    logger.info(
+                        "LinkedIn JD extracted (%d chars)", len(text)
+                    )
+                else:
+                    # LinkedIn markup not found — fall back to full page
+                    text = _clean_html_to_text(html)
+            else:
+                text = _clean_html_to_text(html)
 
             # Check if expired
             if _check_expired(text, str(resp.url)):
