@@ -41,12 +41,12 @@ async def run_pipeline(dry_run: bool = False, scan_only: bool = False):
     load_dotenv()
     start = datetime.now()
 
-    logger.info("🚀 " + "=" * 56)
+    logger.info(">>> " + "=" * 56)
     logger.info(f"   JOB SEARCH PIPELINE — {start.strftime('%Y-%m-%d %H:%M')}")
     logger.info("   " + "=" * 56)
 
     # Phase 1: Scan
-    logger.info("\n📡 PHASE 1: Scanning for new jobs...")
+    logger.info("\n[SCAN] PHASE 1: Scanning for new jobs...")
     scan_summary = await run_scan(dry_run=dry_run)
 
     if dry_run:
@@ -63,7 +63,7 @@ async def run_pipeline(dry_run: bool = False, scan_only: bool = False):
         return
 
     # Phase 2: Evaluate new jobs
-    logger.info(f"\n🤖 PHASE 2: Evaluating {new_jobs} new job(s)...")
+    logger.info(f"\n[EVAL] PHASE 2: Evaluating {new_jobs} new job(s)...")
     eval_results = await run_evaluate(mode="all")
 
     # Phase 3: Summary
@@ -72,7 +72,7 @@ async def run_pipeline(dry_run: bool = False, scan_only: bool = False):
     high_scores = [r for r in successful_evals if r.get("global_score", 0) >= 3.5]
 
     logger.info(f"\n{'='*60}")
-    logger.info("📊 PIPELINE COMPLETE")
+    logger.info("PIPELINE COMPLETE")
     logger.info(f"{'='*60}")
     logger.info(f"  Duration:         {elapsed:.0f}s")
     logger.info(f"  Jobs scanned:     {scan_summary.get('total_found', 0)}")
@@ -81,10 +81,10 @@ async def run_pipeline(dry_run: bool = False, scan_only: bool = False):
     logger.info(f"  Score >= 3.5:     {len(high_scores)} (CV + cover letter generated)")
 
     if high_scores:
-        logger.info("\n🎯 Top matches:")
+        logger.info("\nTop matches:")
         for r in sorted(high_scores, key=lambda x: x.get("global_score", 0), reverse=True):
             logger.info(
-                f"  ⭐ {r.get('global_score', '?')}/5 — "
+                f"  * {r.get('global_score', '?')}/5 -- "
                 f"{r.get('company', '?')} — {r.get('title', '?')}"
             )
 
