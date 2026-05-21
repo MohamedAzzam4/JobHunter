@@ -104,7 +104,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Scan only, don't write")
     parser.add_argument("--scan-only", action="store_true", help="Scan without evaluating")
     parser.add_argument("--threshold", type=float, default=None, help="Override auto_cv_threshold")
-    parser.add_argument("--german-policy", type=str, choices=["reject_b1_plus", "reject_b2_plus_only", "accept_all"], default=None, help="Override German filter policy")
+    parser.add_argument("--german-policy", type=str, choices=["reject_b1_plus", "reject_b2_plus_only", "reject_unless_bilingual", "accept_all"], default=None, help="Override German filter policy")
     args = parser.parse_args()
 
     asyncio.run(run_pipeline(dry_run=args.dry_run, scan_only=args.scan_only, threshold_override=args.threshold, german_policy=args.german_policy))
