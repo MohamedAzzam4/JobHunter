@@ -115,7 +115,9 @@ candidate:
   github: "https://github.com/your-username"
 
 evaluation:
-  auto_cv_threshold: 3.5               # Minimum score to generate CV
+  auto_cv_threshold: 3.5               # Minimum score to generate CV (1-5)
+  # German filter policy (see German Language Detection section below)
+  german_filter: reject_b1_plus         # reject_b1_plus | reject_b2_plus_only | reject_unless_bilingual | accept_all
 ```
 
 ---
@@ -263,6 +265,26 @@ python run_evaluate.py --all
 python run_all.py
 ```
 
+#### Override threshold and German policy per run
+
+Both `run_evaluate.py` and `run_all.py` accept these optional flags:
+
+```bash
+# Only generate CVs for jobs scoring 4.0 or higher
+python run_evaluate.py --all --threshold 4.0
+
+# Accept German-requiring jobs if they also require English
+python run_evaluate.py --all --german-policy reject_unless_bilingual
+
+# Accept all jobs regardless of German requirements
+python run_all.py --german-policy accept_all
+
+# Combine both flags
+python run_evaluate.py --batch 10 --threshold 4.0 --german-policy reject_b2_plus_only
+```
+
+These flags override the values in `config/profile.yml` for that run only.
+
 ## Architecture
 
 ```
@@ -333,14 +355,25 @@ This prevents hallucination and keeps your CV consistent.
 
 Jobs are classified into 4 levels:
 
-| Level | German Required? | Action |
-|-------|-----------------|--------|
-| **none** | No | Normal evaluation |
-| **A1-A2** | No | Normal evaluation (basic level acceptable) |
-| **B1** | Yes | Auto-rejected — score forced to 0 |
-| **B2+** | Yes | Auto-rejected — score forced to 0 |
+| Level | German Required? | Example Phrases |
+|-------|-----------------|------------------|
+| **none** | No | No mention of German |
+| **A1-A2** | No | "German is a plus", "Grundkenntnisse Deutsch" |
+| **B1** | Yes | "Deutschkenntnisse B1" |
+| **B2+** | Yes | "fliessende Deutschkenntnisse", "gute Deutschkenntnisse" |
 
-Generic phrases like "gute Deutschkenntnisse" are classified as B2+ and auto-rejected.
+Generic phrases like "gute Deutschkenntnisse" are classified as B2+ and rejected by default.
+
+### German Filter Policies
+
+Set the default in `config/profile.yml` under `evaluation.german_filter`, or override per run with `--german-policy`:
+
+| Policy | Behavior |
+|--------|----------|
+| `reject_b1_plus` | **(Default)** Reject B1 and B2+. Only A1-A2 or no German pass through. |
+| `reject_b2_plus_only` | Reject only B2+. B1 jobs are kept. |
+| `reject_unless_bilingual` | Reject German jobs **unless** the JD also mentions English as a requirement. If both German and English are listed, the job is kept. |
+| `accept_all` | Don't auto-reject any German level. |
 
 ## Excel Database
 

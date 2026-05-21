@@ -222,6 +222,26 @@ async def evaluate_job(
         should_reject = german_level in ("B2+", "B1") or german_required
     elif german_policy == "reject_b2_plus_only":
         should_reject = german_level == "B2+"
+    elif german_policy == "reject_unless_bilingual":
+        # Accept German-requiring jobs IF the JD also mentions English
+        if german_level in ("B2+", "B1") or german_required:
+            jd_lower = job.get("description", "").lower()
+            english_signals = [
+                "english", "englisch", "c1", "c2", "b2 english",
+                "fluent in english", "good english", "very good english",
+                "excellent english", "english required", "working language: english",
+                "english is a must", "gute englischkenntnisse",
+                "sehr gute englischkenntnisse", "flie\u00dfend englisch",
+            ]
+            has_english = any(signal in jd_lower for signal in english_signals)
+            if has_english:
+                should_reject = False
+                logger.info(
+                    f"[DE] BILINGUAL: German {german_level} + English found "
+                    f"-> keeping job (policy={german_policy})"
+                )
+            else:
+                should_reject = True
     # accept_all: never auto-reject
 
     if should_reject:
@@ -399,7 +419,7 @@ def main():
     group.add_argument("--url", type=str, help="Evaluate a specific job URL")
     group.add_argument("--batch", type=int, help="Evaluate next N unchecked jobs")
     parser.add_argument("--threshold", type=float, default=None, help="Override auto_cv_threshold (e.g. --threshold 4.0)")
-    parser.add_argument("--german-policy", type=str, choices=["reject_b1_plus", "reject_b2_plus_only", "accept_all"], default=None, help="Override German filter policy for this run")
+    parser.add_argument("--german-policy", type=str, choices=["reject_b1_plus", "reject_b2_plus_only", "reject_unless_bilingual", "accept_all"], default=None, help="Override German filter policy for this run")
     args = parser.parse_args()
 
     if args.url:
