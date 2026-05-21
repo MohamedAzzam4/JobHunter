@@ -87,12 +87,17 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", subtitle: str = ""
     in_list = False
     in_section = False
     header_done = False
-    # Buffer to detect title+date pairs across consecutive lines
-    pending_title = None
+
+    # State machine: buffer title and subtitle across blank lines
+    # until we find a date (year pattern) or other content.
+    pending_title = None      # Bold line waiting for a date
+    pending_subtitle = None   # Italic line (no year) waiting for a date
 
     for i, line in enumerate(lines):
         stripped = line.strip()
 
+        # Empty lines: close lists but do NOT flush title/subtitle state
+        # (dates may be several blank lines after the title)
         if not stripped:
             if in_list:
                 html_parts.append("</ul>")
@@ -116,21 +121,26 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", subtitle: str = ""
             if in_list:
                 html_parts.append("</ul>")
                 in_list = False
+            pending_title, pending_subtitle = _flush_pending(
+                html_parts, pending_title, pending_subtitle
+            )
             if in_section:
                 html_parts.append("</div>")
             header_done = True
             in_section = True
             section_name = _strip_bold(stripped[3:].strip())
             html_parts.append(f'<div class="section"><h2 class="section-title">{section_name}</h2>')
-            pending_title = None
             continue
 
-        # Check for inline title+date: **CRM Developer** *2021 – 2025*
+        # Check for inline title+date on one line: **Title** *Date*
         inline_match = TITLE_DATE_INLINE.match(stripped)
         if inline_match:
             if in_list:
                 html_parts.append("</ul>")
                 in_list = False
+            pending_title, pending_subtitle = _flush_pending(
+                html_parts, pending_title, pending_subtitle
+            )
             title_text = inline_match.group(1)
             date_text = inline_match.group(2)
             html_parts.append(
@@ -139,63 +149,95 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", subtitle: str = ""
                 f'<td class="date">{date_text}</td>'
                 f'</tr></table>'
             )
-            pending_title = None
             continue
 
-        # Bold title line (potential title that has a date on the next line)
-        if stripped.startswith("**") and stripped.endswith("**"):
+        # Bold title line: **Title**
+        if stripped.startswith("**") and stripped.endswith("**") and not stripped.startswith("* "):
             if in_list:
                 html_parts.append("</ul>")
                 in_list = False
-            title_text = stripped.strip("* ").strip()
-            # Look ahead for a date line (italic on next non-empty line)
-            next_lines = _peek_ahead(lines, i + 1)
-            if next_lines.get("date"):
-                # Title with date on next line — buffer it
-                pending_title = title_text
-                continue
-            else:
-                # Standalone bold line (no date following)
-                html_parts.append(
-                    f'<div style="font-weight:bold;font-size:11pt;margin-top:5px;">'
-                    f'{_md_inline(title_text)}</div>'
-                )
-                pending_title = None
-                continue
-
-        # Italic line — could be a date or a subtitle
-        if stripped.startswith("*") and stripped.endswith("*") and not stripped.startswith("* "):
-            inner = stripped.strip("*").strip()
-
-            # If we have a pending title, this is the date line
-            if pending_title:
-                html_parts.append(
-                    f'<table class="item-header"><tr>'
-                    f'<td>{_md_inline(pending_title)}</td>'
-                    f'<td class="date">{inner}</td>'
-                    f'</tr></table>'
-                )
-                pending_title = None
-                continue
-
-            # Check if it looks like a company/location subtitle
-            # (contains a location or company separator like comma)
-            html_parts.append(f'<div class="item-subheader">{_md_inline(inner)}</div>')
+            # Flush any PREVIOUS pending state before starting a new title
+            pending_title, pending_subtitle = _flush_pending(
+                html_parts, pending_title, pending_subtitle
+            )
+            # Buffer this title — we'll wait for a date or subtitle
+            pending_title = stripped.strip("* ").strip()
             continue
 
-        # Flush pending title if it wasn't followed by a date
-        if pending_title:
-            html_parts.append(
-                f'<div style="font-weight:bold;font-size:11pt;margin-top:5px;">'
-                f'{_md_inline(pending_title)}</div>'
-            )
-            pending_title = None
+        # Italic line (NOT a bullet "* text"): *subtitle* or *date*
+        if stripped.startswith("*") and stripped.endswith("*") and not stripped.startswith("* "):
+            inner = stripped.strip("*").strip()
+            has_year = bool(re.search(r'\d{4}', inner))
+
+            # Case 1: Combined subtitle+date — *Company, Location | 2024 – Present*
+            if has_year and "|" in inner:
+                parts = inner.split("|", 1)
+                subtitle_part = parts[0].strip()
+                date_part = parts[1].strip()
+
+                if pending_title:
+                    # Create table: Title | Date
+                    html_parts.append(
+                        f'<table class="item-header"><tr>'
+                        f'<td>{_md_inline(pending_title)}</td>'
+                        f'<td class="date">{date_part}</td>'
+                        f'</tr></table>'
+                    )
+                    # Render company/location as subtitle below
+                    html_parts.append(
+                        f'<div class="item-subheader">{_md_inline(subtitle_part)}</div>'
+                    )
+                    pending_title = None
+                    pending_subtitle = None
+                else:
+                    # No pending title — render as standalone subtitle
+                    html_parts.append(
+                        f'<div class="item-subheader">{_md_inline(inner)}</div>'
+                    )
+                continue
+
+            # Case 2: Date-only line — *Apr 2026 – Apr 2028 (Expected)*
+            if has_year:
+                if pending_title:
+                    # Create table: Title | Date
+                    html_parts.append(
+                        f'<table class="item-header"><tr>'
+                        f'<td>{_md_inline(pending_title)}</td>'
+                        f'<td class="date">{inner}</td>'
+                        f'</tr></table>'
+                    )
+                    # If there was a buffered subtitle, render it below the table
+                    if pending_subtitle:
+                        html_parts.append(
+                            f'<div class="item-subheader">'
+                            f'{_md_inline(pending_subtitle)}</div>'
+                        )
+                    pending_title = None
+                    pending_subtitle = None
+                else:
+                    # No pending title — render as standalone italic
+                    html_parts.append(
+                        f'<div class="item-subheader">{_md_inline(inner)}</div>'
+                    )
+                continue
+
+            # Case 3: No year — it's a subtitle (university/company name)
+            if pending_subtitle:
+                # Flush old subtitle before storing new one
+                html_parts.append(
+                    f'<div class="item-subheader">{_md_inline(pending_subtitle)}</div>'
+                )
+            pending_subtitle = inner
+            continue
 
         # H3 - Sub-section
         if stripped.startswith("### "):
             if in_list:
                 html_parts.append("</ul>")
                 in_list = False
+            pending_title, pending_subtitle = _flush_pending(
+                html_parts, pending_title, pending_subtitle
+            )
             sub = stripped[4:].strip()
             html_parts.append(
                 f'<div style="font-weight:bold;font-size:11pt;margin-top:5px;">'
@@ -205,6 +247,10 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", subtitle: str = ""
 
         # Bullet point
         if stripped.startswith("- ") or stripped.startswith("* "):
+            # Flush pending state before starting bullets
+            pending_title, pending_subtitle = _flush_pending(
+                html_parts, pending_title, pending_subtitle
+            )
             if not in_list:
                 html_parts.append("<ul>")
                 in_list = True
@@ -216,14 +262,15 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", subtitle: str = ""
         if in_list:
             html_parts.append("</ul>")
             in_list = False
+        pending_title, pending_subtitle = _flush_pending(
+            html_parts, pending_title, pending_subtitle
+        )
         html_parts.append(f'<p style="font-size:10pt;margin:2px 0;">{_md_inline(stripped)}</p>')
 
-    # Flush pending
-    if pending_title:
-        html_parts.append(
-            f'<div style="font-weight:bold;font-size:11pt;margin-top:5px;">'
-            f'{_md_inline(pending_title)}</div>'
-        )
+    # Flush final state
+    pending_title, pending_subtitle = _flush_pending(
+        html_parts, pending_title, pending_subtitle
+    )
     if in_list:
         html_parts.append("</ul>")
     if in_section:
@@ -345,20 +392,24 @@ def _md_to_html_cv(md_content: str, candidate_name: str = "", subtitle: str = ""
 </html>"""
 
 
-def _peek_ahead(lines: list[str], start: int) -> dict:
-    """Look at the next non-empty line to check if it's a date."""
-    for j in range(start, min(start + 3, len(lines))):
-        stripped = lines[j].strip()
-        if not stripped:
-            continue
-        # Check if it's an italic date line
-        if stripped.startswith("*") and stripped.endswith("*") and not stripped.startswith("* "):
-            inner = stripped.strip("*").strip()
-            # Must contain a year to be a date
-            if re.search(r"\d{4}", inner):
-                return {"date": inner}
-        break
-    return {}
+def _flush_pending(html_parts: list, pending_title: str | None,
+                   pending_subtitle: str | None) -> tuple[None, None]:
+    """Flush buffered title/subtitle as standalone (non-table) elements.
+    
+    Called when we encounter content that breaks the title→date chain
+    (e.g., bullets, section headers, paragraphs) without finding a date.
+    Returns (None, None) to clear both state variables.
+    """
+    if pending_title:
+        html_parts.append(
+            f'<div style="font-weight:bold;font-size:11pt;margin-top:5px;">'
+            f'{_md_inline(pending_title)}</div>'
+        )
+    if pending_subtitle:
+        html_parts.append(
+            f'<div class="item-subheader">{_md_inline(pending_subtitle)}</div>'
+        )
+    return None, None
 
 
 def _load_candidate_info() -> dict:
