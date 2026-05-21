@@ -131,6 +131,7 @@ async def evaluate_job(
     threshold: float,
     telegram: TelegramNotifier,
     jd_cache: JDCache | None = None,
+    german_policy: str = "reject_b1_plus",
 ) -> dict:
     """Evaluate a single job and generate CV/cover letter if score is high enough."""
 
@@ -193,6 +194,15 @@ async def evaluate_job(
 
     score = evaluation.get("global_score", 0)
 
+    # Clamp score to valid 1-5 range (guard against AI returning out-of-range values)
+    try:
+        score = max(1, min(5, float(score)))
+        evaluation["global_score"] = round(score, 1)
+    except (ValueError, TypeError):
+        score = 0
+        evaluation["global_score"] = 0
+        logger.warning(f"Invalid score from AI: {evaluation.get('global_score')}, defaulting to 0")
+
     # Update job dict with AI-extracted company/title if originally missing
     if not job.get("company") or job["company"] == "Unknown":
         job["company"] = evaluation.get("company", "Unknown")
@@ -203,17 +213,25 @@ async def evaluate_job(
     if job.get("date_posted"):
         evaluation["date_posted"] = job["date_posted"]
 
-    # --- German B2+ Auto-Rejection ---
+    # --- German Language Auto-Rejection ---
     german_level = evaluation.get("german_level_required", "none")
     german_required = evaluation.get("german_required", False)
 
-    if german_level in ("B2+", "B1") or german_required:
+    should_reject = False
+    if german_policy == "reject_b1_plus":
+        should_reject = german_level in ("B2+", "B1") or german_required
+    elif german_policy == "reject_b2_plus_only":
+        should_reject = german_level == "B2+"
+    # accept_all: never auto-reject
+
+    if should_reject:
         original_score = score
         score = 0
         evaluation["global_score"] = 0
         evaluation["recommendation"] = "skip_german"
         logger.info(
-            f"[DE] AUTO-SKIP: German {german_level} required | "
+            f"[DE] AUTO-SKIP: German {german_level} required "
+            f"(policy={german_policy}) | "
             f"Original score: {original_score}/5 | Company: {job['company']}"
         )
     else:
@@ -291,11 +309,12 @@ async def evaluate_job(
     return evaluation
 
 
-async def run_evaluate(mode: str = "next", url: str | None = None, batch_size: int = 1):
+async def run_evaluate(mode: str = "next", url: str | None = None, batch_size: int = 1, threshold_override: float | None = None, german_policy: str | None = None):
     """Main evaluation runner."""
     load_dotenv()
     profile = load_profile()
-    threshold = profile.get("evaluation", {}).get("auto_cv_threshold", 3.5)
+    threshold = threshold_override if threshold_override is not None else profile.get("evaluation", {}).get("auto_cv_threshold", 3.5)
+    german_policy_resolved = german_policy if german_policy else profile.get("evaluation", {}).get("german_filter", "reject_b1_plus")
 
     evaluator = Evaluator()
     cv_tailor = CVTailor()
@@ -305,7 +324,7 @@ async def run_evaluate(mode: str = "next", url: str | None = None, batch_size: i
 
     if mode == "url" and url:
         job = {"url": url, "company": "Unknown", "title": "Unknown"}
-        result = await evaluate_job(job, evaluator, cv_tailor, cover_writer, threshold, telegram, jd_cache)
+        result = await evaluate_job(job, evaluator, cv_tailor, cover_writer, threshold, telegram, jd_cache, german_policy=german_policy_resolved)
         return [result]
 
     # Get pending jobs
@@ -329,7 +348,7 @@ async def run_evaluate(mode: str = "next", url: str | None = None, batch_size: i
         logger.info(f"Job {i+1}/{len(jobs_to_evaluate)}")
         logger.info(f"{'='*60}")
 
-        result = await evaluate_job(job, evaluator, cv_tailor, cover_writer, threshold, telegram, jd_cache)
+        result = await evaluate_job(job, evaluator, cv_tailor, cover_writer, threshold, telegram, jd_cache, german_policy=german_policy_resolved)
         results.append(result)
 
         # Rate limit delay between evaluations
@@ -379,16 +398,18 @@ def main():
     group.add_argument("--all", action="store_true", help="Evaluate all unchecked jobs")
     group.add_argument("--url", type=str, help="Evaluate a specific job URL")
     group.add_argument("--batch", type=int, help="Evaluate next N unchecked jobs")
+    parser.add_argument("--threshold", type=float, default=None, help="Override auto_cv_threshold (e.g. --threshold 4.0)")
+    parser.add_argument("--german-policy", type=str, choices=["reject_b1_plus", "reject_b2_plus_only", "accept_all"], default=None, help="Override German filter policy for this run")
     args = parser.parse_args()
 
     if args.url:
-        asyncio.run(run_evaluate(mode="url", url=args.url))
+        asyncio.run(run_evaluate(mode="url", url=args.url, threshold_override=args.threshold, german_policy=args.german_policy))
     elif args.all:
-        asyncio.run(run_evaluate(mode="all"))
+        asyncio.run(run_evaluate(mode="all", threshold_override=args.threshold, german_policy=args.german_policy))
     elif args.batch:
-        asyncio.run(run_evaluate(mode="batch", batch_size=args.batch))
+        asyncio.run(run_evaluate(mode="batch", batch_size=args.batch, threshold_override=args.threshold, german_policy=args.german_policy))
     else:
-        asyncio.run(run_evaluate(mode="next"))
+        asyncio.run(run_evaluate(mode="next", threshold_override=args.threshold, german_policy=args.german_policy))
 
 
 if __name__ == "__main__":

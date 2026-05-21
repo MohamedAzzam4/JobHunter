@@ -48,7 +48,7 @@ class PipelineBridge:
     def _create_pipeline_file(self):
         """Create initial pipeline.md."""
         self.pipeline_path.write_text(
-            "# Job Pipeline\n\n## Pendientes\n\n## Procesadas\n",
+            "# Job Pipeline\n\n## Pending\n\n## Processed\n",
             encoding="utf-8",
         )
 
@@ -144,13 +144,13 @@ class PipelineBridge:
         return summary
 
     def _append_to_pipeline(self, jobs: list[dict]):
-        """Append new jobs to pipeline.md under '## Pendientes'."""
+        """Append new jobs to pipeline.md under '## Pending'."""
         text = self.pipeline_path.read_text(encoding="utf-8")
 
         lines = []
         for job in jobs:
             url = job.get("url", "")
-            company = job.get("company", "Unknown")
+            company = job.get("company", "Unknown").replace("|", "-")
             title = job.get("title", "Unknown")
             location = job.get("location", "")
             loc_suffix = f" [{location}]" if location else ""
@@ -158,9 +158,12 @@ class PipelineBridge:
 
         block = "\n".join(lines) + "\n"
 
-        # Insert after "## Pendientes" header
-        marker = "## Pendientes"
+        # Support both new (Pending) and legacy (Pendientes) headers
+        marker = "## Pending"
         idx = text.find(marker)
+        if idx == -1:
+            marker = "## Pendientes"  # Legacy fallback
+            idx = text.find(marker)
         if idx != -1:
             insert_at = idx + len(marker)
             # Skip any existing newlines right after the marker
@@ -168,8 +171,8 @@ class PipelineBridge:
                 insert_at += 1
             text = text[:insert_at] + "\n" + block + text[insert_at:]
         else:
-            # No Pendientes section — prepend
-            text = f"## Pendientes\n\n{block}\n{text}"
+            # No Pending section — prepend
+            text = f"## Pending\n\n{block}\n{text}"
 
         self.pipeline_path.write_text(text, encoding="utf-8")
         logger.info(f"Added {len(jobs)} jobs to pipeline.md")

@@ -17,6 +17,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import yaml
 from dotenv import load_dotenv
 
 from run_scan import run_scan
@@ -36,9 +37,18 @@ file_handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)
 logging.getLogger().addHandler(file_handler)
 
 
-async def run_pipeline(dry_run: bool = False, scan_only: bool = False):
+async def run_pipeline(dry_run: bool = False, scan_only: bool = False, threshold_override: float | None = None, german_policy: str | None = None):
     """Execute the full pipeline."""
     load_dotenv()
+
+    # Load threshold from config (or CLI override)
+    profile_path = Path("config/profile.yml")
+    if profile_path.exists():
+        with open(profile_path, "r", encoding="utf-8") as f:
+            profile = yaml.safe_load(f) or {}
+    else:
+        profile = {}
+    threshold = threshold_override if threshold_override is not None else profile.get("evaluation", {}).get("auto_cv_threshold", 3.5)
     start = datetime.now()
 
     logger.info(">>> " + "=" * 56)
@@ -64,12 +74,12 @@ async def run_pipeline(dry_run: bool = False, scan_only: bool = False):
 
     # Phase 2: Evaluate new jobs
     logger.info(f"\n[EVAL] PHASE 2: Evaluating {new_jobs} new job(s)...")
-    eval_results = await run_evaluate(mode="all")
+    eval_results = await run_evaluate(mode="all", threshold_override=threshold_override, german_policy=german_policy)
 
     # Phase 3: Summary
     elapsed = (datetime.now() - start).total_seconds()
     successful_evals = [r for r in eval_results if r.get("success")]
-    high_scores = [r for r in successful_evals if r.get("global_score", 0) >= 3.5]
+    high_scores = [r for r in successful_evals if r.get("global_score", 0) >= threshold]
 
     logger.info(f"\n{'='*60}")
     logger.info("PIPELINE COMPLETE")
@@ -78,7 +88,7 @@ async def run_pipeline(dry_run: bool = False, scan_only: bool = False):
     logger.info(f"  Jobs scanned:     {scan_summary.get('total_found', 0)}")
     logger.info(f"  New jobs:         {new_jobs}")
     logger.info(f"  Evaluated:        {len(successful_evals)}")
-    logger.info(f"  Score >= 3.5:     {len(high_scores)} (CV + cover letter generated)")
+    logger.info(f"  Score >= {threshold}:     {len(high_scores)} (CV + cover letter generated)")
 
     if high_scores:
         logger.info("\nTop matches:")
@@ -93,9 +103,11 @@ def main():
     parser = argparse.ArgumentParser(description="Full job search pipeline")
     parser.add_argument("--dry-run", action="store_true", help="Scan only, don't write")
     parser.add_argument("--scan-only", action="store_true", help="Scan without evaluating")
+    parser.add_argument("--threshold", type=float, default=None, help="Override auto_cv_threshold")
+    parser.add_argument("--german-policy", type=str, choices=["reject_b1_plus", "reject_b2_plus_only", "accept_all"], default=None, help="Override German filter policy")
     args = parser.parse_args()
 
-    asyncio.run(run_pipeline(dry_run=args.dry_run, scan_only=args.scan_only))
+    asyncio.run(run_pipeline(dry_run=args.dry_run, scan_only=args.scan_only, threshold_override=args.threshold, german_policy=args.german_policy))
 
 
 if __name__ == "__main__":

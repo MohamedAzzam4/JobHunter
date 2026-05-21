@@ -52,6 +52,11 @@ preferences:
 
 evaluation:
   auto_cv_threshold: 3.5
+  # German filter policy: reject_b1_plus (default), reject_b2_plus_only, accept_all
+  # reject_b1_plus   = reject B1 and B2+ (strictest — only A1-A2 or none pass)
+  # reject_b2_plus_only = reject only B2+ (B1 jobs pass through)
+  # accept_all       = don't auto-reject any German level
+  german_filter: reject_b1_plus
   model_primary: "google/gemma-4-31b-it:free"
   model_backup: "nvidia/nvidia-nemotron-3-super:free"
   model_fallback: "openai/gpt-oss-120b:free"
