@@ -3,6 +3,7 @@
 # Scanner
 python-jobspy>=1.1.75
 pandas>=2.0.0
+numpy>=2.4                # MUST come after jobspy — prevents downgrade to 1.26 which crashes on Python 3.13+
 
 # HTTP + API
 httpx>=0.27.0

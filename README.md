@@ -55,6 +55,11 @@ source jobhunter_venv/bin/activate
 pip install -r requirements.txt
 ```
 
+> **⚠️ Python 3.13+ users:** `python-jobspy` internally pins `numpy==1.26.3`, which crashes on Python 3.13+. Our `requirements.txt` overrides this with `numpy>=2.4`, but if you still see `OverflowError: cannot convert longdouble infinity to integer`, run:
+> ```bash
+> pip install "numpy>=2.4" --force-reinstall --no-deps
+> ```
+
 **WeasyPrint (PDF generation) on Windows:**
 ```bash
 # Install MSYS2 from https://www.msys2.org/
