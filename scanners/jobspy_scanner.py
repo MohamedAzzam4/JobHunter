@@ -42,7 +42,7 @@ class JobSpyScanner(BaseScanner):
             return self._finish_result(result)
 
         # Run jobspy in a thread pool since it's synchronous + blocking
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         with ThreadPoolExecutor(max_workers=1) as executor:
             for search_config in self.searches:
                 try:
