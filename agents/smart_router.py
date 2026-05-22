@@ -51,6 +51,7 @@ class SmartRouter:
         self._google_client = None
         self._openrouter_keys = self._load_openrouter_keys()
         self._key_cycle = cycle(self._openrouter_keys) if self._openrouter_keys else None
+        self._models = self._load_openrouter_models()
         self._request_count = 0
 
         # Try to init Google client
@@ -83,6 +84,28 @@ class SmartRouter:
 
         logger.info("Loaded %d OpenRouter API keys", len(keys))
         return keys
+
+    @staticmethod
+    def _load_openrouter_models() -> list[str]:
+        """Load OpenRouter model chain from profile.yml."""
+        try:
+            import yaml
+            from pathlib import Path
+            profile_path = Path("config/profile.yml")
+            if profile_path.exists():
+                with open(profile_path, "r", encoding="utf-8") as f:
+                    profile = yaml.safe_load(f) or {}
+                models = profile.get("evaluation", {}).get("openrouter_models", [])
+                if models:
+                    return models
+        except Exception:
+            pass
+        # Defaults if profile.yml is missing or has no models
+        return [
+            "openai/gpt-oss-120b:free",
+            "google/gemma-4-31b-it:free",
+            "deepseek/deepseek-v4-flash:free",
+        ]
 
     def evaluate(
         self,
@@ -145,11 +168,7 @@ class SmartRouter:
         """Make a request to OpenRouter, rotating across keys and models."""
         import httpx
 
-        models = [
-            "google/gemma-4-31b-it:free",
-            "nvidia/nvidia-nemotron-3-super:free",
-            "openai/gpt-oss-120b:free",
-        ]
+        models = self._models
 
         # Try each key+model combination
         keys_tried = 0
@@ -221,11 +240,15 @@ class SmartRouter:
                 content = choices[0].get("message", {}).get("content", "")
                 usage = data.get("usage", {})
 
+                prompt_tokens = usage.get("prompt_tokens", 0)
+                completion_tokens = usage.get("completion_tokens", 0)
+                total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
                 logger.info(
-                    "[OR-key#%d/%s] %s->%s tokens, %dms",
+                    "[OR-key#%d/%s] in=%s out=%s total=%s tokens, %dms",
                     key_idx, model.split("/")[-1],
-                    usage.get("prompt_tokens", "?"),
-                    usage.get("completion_tokens", "?"),
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
                     latency,
                 )
 

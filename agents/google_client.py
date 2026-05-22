@@ -44,7 +44,7 @@ class GoogleAIClient:
         models: list[str] | None = None,
     ):
         # 26b is more reliable; 31b has intermittent 500s
-        self.models = models or ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]
+        self.models = models or self._load_google_models()
 
         # Lazy import to avoid crash if not installed
         try:
@@ -96,6 +96,23 @@ class GoogleAIClient:
             keys.append(val)
             idx += 1
         return keys
+
+    @staticmethod
+    def _load_google_models() -> list[str]:
+        """Load Google model chain from profile.yml."""
+        try:
+            import yaml
+            from pathlib import Path
+            profile_path = Path("config/profile.yml")
+            if profile_path.exists():
+                with open(profile_path, "r", encoding="utf-8") as f:
+                    profile = yaml.safe_load(f) or {}
+                models = profile.get("evaluation", {}).get("google_models", [])
+                if models:
+                    return models
+        except Exception:
+            pass
+        return ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]
 
     @property
     def client(self):
@@ -161,10 +178,23 @@ class GoogleAIClient:
                         )
                         continue
 
-                    logger.info(
-                        "[Google/%s] key[%d] %dms",
-                        model, self._current_key_idx, latency,
-                    )
+                    # Log token usage if available
+                    usage_meta = getattr(response, 'usage_metadata', None)
+                    if usage_meta:
+                        prompt_tokens = getattr(usage_meta, 'prompt_token_count', 0)
+                        completion_tokens = getattr(usage_meta, 'candidates_token_count', 0)
+                        total_tokens = getattr(usage_meta, 'total_token_count', 0)
+                        logger.info(
+                            "[Google/%s] key[%d] in=%s out=%s total=%s tokens, %dms",
+                            model, self._current_key_idx,
+                            prompt_tokens, completion_tokens, total_tokens,
+                            latency,
+                        )
+                    else:
+                        logger.info(
+                            "[Google/%s] key[%d] %dms",
+                            model, self._current_key_idx, latency,
+                        )
 
                     return GoogleAIResponse(
                         content=response.text,

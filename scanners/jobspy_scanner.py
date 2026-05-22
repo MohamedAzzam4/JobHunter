@@ -28,10 +28,56 @@ class JobSpyScanner(BaseScanner):
 
     def __init__(self, config: dict):
         super().__init__(config, name="jobspy")
-        self.searches = [
-            s for s in config.get("jobspy_searches", [])
-            if s.get("enabled", True)
-        ]
+        self.searches = self._load_searches(config)
+
+    @staticmethod
+    def _load_searches(config: dict) -> list[dict]:
+        """Load search configs, supporting both compact and legacy formats.
+
+        Compact format (terms × locations cross-product):
+            jobspy_searches:
+              terms: ["Working Student", "Werkstudent"]
+              locations: ["Erlangen, Germany", "Munich, Germany"]
+              sites: ["indeed", "linkedin", "google"]
+              results_wanted: 50
+              distance_km: 50
+
+        Legacy format (explicit per-search entries):
+            jobspy_searches:
+              - term: "Working Student"
+                location: "Erlangen, Germany"
+                ...
+        """
+        raw = config.get("jobspy_searches", {})
+
+        # Legacy format: list of dicts
+        if isinstance(raw, list):
+            return [s for s in raw if s.get("enabled", True)]
+
+        # Compact format: dict with terms + locations
+        terms = raw.get("terms", [])
+        locations = raw.get("locations", [])
+        if not terms or not locations:
+            return []
+
+        sites = raw.get("sites", ["indeed", "linkedin", "google"])
+        results_wanted = raw.get("results_wanted", 50)
+        distance_km = raw.get("distance_km", None)
+
+        searches = []
+        for term in terms:
+            for location in locations:
+                entry = {
+                    "term": term,
+                    "location": location,
+                    "sites": sites,
+                    "results_wanted": results_wanted,
+                }
+                if distance_km:
+                    entry["distance_km"] = distance_km
+                searches.append(entry)
+
+        return searches
 
     async def scan(self) -> ScanResult:
         """Execute all configured JobSpy searches."""
