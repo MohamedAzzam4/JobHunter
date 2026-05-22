@@ -35,20 +35,24 @@ def apply_german_policy(
 
     should_reject = False
     if german_policy == "reject_b1_plus":
-        should_reject = german_level in ("B2+", "B1") or german_required
+        should_reject = german_level in ("B2+", "B1")
     elif german_policy == "reject_b2_plus_only":
         should_reject = german_level == "B2+"
     elif german_policy == "reject_unless_bilingual":
         if german_level in ("B2+", "B1") or german_required:
             jd_lower = job.get("description", "").lower()
             english_signals = [
-                "english", "englisch", "c1", "c2", "b2 english",
-                "fluent in english", "good english", "very good english",
-                "excellent english", "english required", "working language: english",
-                "english is a must", "gute englischkenntnisse",
-                "sehr gute englischkenntnisse", "fließend englisch",
+                "english", "englisch", "fluent in english", "good english",
+                "very good english", "excellent english", "english required",
+                "working language: english", "english is a must",
+                "gute englischkenntnisse", "sehr gute englischkenntnisse",
+                "fließend englisch", "b2 english",
             ]
+            import re
             has_english = any(signal in jd_lower for signal in english_signals)
+            if not has_english:
+                has_english = bool(re.search(r'\b(c1|c2)\b.*\b(english|englisch)\b', jd_lower)) or \
+                              bool(re.search(r'\b(english|englisch)\b.*\b(c1|c2)\b', jd_lower))
             if has_english:
                 should_reject = False
             else:
@@ -263,11 +267,33 @@ class TestRejectB1Plus:
         assert result["global_score"] == 3.8
         assert result["recommendation"] == "apply"
 
-    def test_rejects_german_required_flag(self):
-        """If german_required=True, reject even if level is not specified."""
+    def test_keeps_german_required_flag_without_level(self):
+        """If german_required=True but level is 'none', reject_b1_plus does NOT reject.
+        
+        The level classification is what matters, not the boolean flag.
+        This prevents A1-A2 jobs from being silently rejected when the AI
+        sets german_required=True alongside a low level classification.
+        """
         eval_data = {"global_score": 3.5, "german_level_required": "none", "german_required": True, "recommendation": "consider"}
         result = apply_german_policy(eval_data, {}, self.POLICY)
-        assert result["global_score"] == 0
+        assert result["global_score"] == 3.5  # NOT rejected — level is "none"
+
+    def test_keeps_a1_a2_even_if_german_required_true(self):
+        """Bug fix: A1-A2 jobs must pass even if AI sets german_required=True.
+        
+        Free AI models sometimes set german_required=True for A1-A2 jobs
+        because 'German is mentioned'. The old `or german_required` clause
+        would silently reject these. Now only the level matters.
+        """
+        eval_a2_with_flag = {
+            "global_score": 3.8,
+            "german_level_required": "A1-A2",
+            "german_required": True,  # AI incorrectly flagged this
+            "recommendation": "apply",
+        }
+        result = apply_german_policy(eval_a2_with_flag, JOB_A2_DYSON, self.POLICY)
+        assert result["global_score"] == 3.8  # Kept!
+        assert result["recommendation"] == "apply"
 
 
 class TestRejectB2PlusOnly:

@@ -219,7 +219,7 @@ async def evaluate_job(
 
     should_reject = False
     if german_policy == "reject_b1_plus":
-        should_reject = german_level in ("B2+", "B1") or german_required
+        should_reject = german_level in ("B2+", "B1")
     elif german_policy == "reject_b2_plus_only":
         should_reject = german_level == "B2+"
     elif german_policy == "reject_unless_bilingual":
@@ -227,13 +227,17 @@ async def evaluate_job(
         if german_level in ("B2+", "B1") or german_required:
             jd_lower = job.get("description", "").lower()
             english_signals = [
-                "english", "englisch", "c1", "c2", "b2 english",
-                "fluent in english", "good english", "very good english",
-                "excellent english", "english required", "working language: english",
-                "english is a must", "gute englischkenntnisse",
-                "sehr gute englischkenntnisse", "flie\u00dfend englisch",
+                "english", "englisch", "fluent in english", "good english",
+                "very good english", "excellent english", "english required",
+                "working language: english", "english is a must",
+                "gute englischkenntnisse", "sehr gute englischkenntnisse",
+                "flie\u00dfend englisch", "b2 english",
             ]
+            # Check word-boundary matches for short CEFR codes (avoid matching "C1 certification" etc.)
             has_english = any(signal in jd_lower for signal in english_signals)
+            if not has_english:
+                has_english = bool(re.search(r'\b(c1|c2)\b.*\b(english|englisch)\b', jd_lower)) or \
+                              bool(re.search(r'\b(english|englisch)\b.*\b(c1|c2)\b', jd_lower))
             if has_english:
                 should_reject = False
                 logger.info(
@@ -320,8 +324,8 @@ async def evaluate_job(
                 cl_pdf_result = generate_cover_letter_pdf(
                     md_content=cover_result.get("content", ""),
                     output_path=cover_pdf_out,
-                    company=company,
-                    role=title,
+                    company=job.get("company", "Unknown"),
+                    role=job.get("title", "Unknown"),
                 )
                 if cl_pdf_result.get("success"):
                     cover_pdf_path = cl_pdf_result["output_path"]

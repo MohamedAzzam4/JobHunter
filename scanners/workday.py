@@ -23,17 +23,8 @@ logger = logging.getLogger(__name__)
 
 # Known API endpoints — discovered by inspecting network traffic
 # Only include companies with VERIFIED, working endpoints
+# Note: Adidas/Puma use Eightfold.ai (no direct API support) — covered by JobSpy
 KNOWN_ENDPOINTS = {
-    "adidas": {
-        "api_url": "https://careers.adidas-group.com/api/jobs",
-        "base_url": "https://careers.adidas-group.com",
-        "provider": "eightfold",
-    },
-    "puma": {
-        "api_url": "https://careers.puma.com/api/jobs",
-        "base_url": "https://careers.puma.com",
-        "provider": "eightfold",
-    },
     "bosch": {
         "api_url": "https://careers.smartrecruiters.com/BoschGroup",
         "base_url": "https://www.bosch.com/careers/",
