@@ -227,21 +227,118 @@ You need a Telegram bot to receive job notifications. Setup takes 30 seconds:
 
 ### 6. Configure Search Queries (`config/portals.yml`)
 
-Edit the search terms, locations, and job sites:
+This file controls **what jobs get scanned**, **how they're filtered**, and **which companies are tracked**. The defaults below are configured for working student positions in the Erlangen/Nuremberg/Munich area — **edit them to match your target roles and locations.**
+
+> ⚠️ **You must customize this file.** The default locations, companies, and search terms are examples. Replace them with your own target cities, companies, and job titles.
+
+#### Title & Location Filters
+
+These filters run **after** scanning to remove irrelevant jobs before they enter the pipeline:
 
 ```yaml
-jobspy:
-  search_terms:
+title_filter:
+  positive:                              # Job must contain at least one of these
     - "Working Student"
     - "Werkstudent"
-  locations:
-    - "Erlangen, Germany"
-    - "Munich, Germany"
-  sites:
-    - indeed
-    - linkedin
-    - google
-  results_wanted: 50
+    - "Werkstudentin"
+    - "Student Assistant"
+    - "Studentische Hilfskraft"
+    - "HiWi"
+    - "Studentenjob"
+    - "Student Worker"
+    - "Thesis Student"
+    - "Intern"
+  negative:                              # Job is rejected if it contains any of these
+    - "Senior Engineer"
+    - "Staff Engineer"
+    - "Principal"
+    - "Director"
+    - "VP "
+    - "Head of"
+    - "Ausbildung"
+    - "Vollzeit"
+    - "Full-time"
+    - "C-Level"
+
+location_filter:
+  allow:                                 # Job must be in one of these locations
+    - "Erlangen"
+    - "Nürnberg"
+    - "Nuremberg"
+    - "Munich"
+    - "München"
+    - "Bavaria"
+    - "Bayern"
+    - "Remote"
+    - "Hybrid"
+    - "Germany"
+    - "Deutschland"
+  block: []                              # Jobs in these locations are always rejected
+```
+
+#### Tracked Companies
+
+Companies scanned via direct API. Only `scan_method: workday` entries are actively scanned — others (`websearch`) are placeholders for future implementation:
+
+```yaml
+tracked_companies:
+  - name: Adidas
+    careers_url: "https://careers.adidas-group.com"
+    scan_method: workday
+    search_terms: ["working student", "werkstudent"]
+    enabled: true
+
+  - name: Puma
+    careers_url: "https://careers.puma.com"
+    scan_method: workday
+    search_terms: ["working student"]
+    enabled: true
+
+  - name: Bosch
+    careers_url: "https://www.bosch.com/careers/"
+    scan_method: workday
+    search_terms: ["working student"]
+    enabled: true
+
+  # Companies with scan_method: websearch are informational placeholders.
+  # No websearch scanner exists yet — these companies are covered by JobSpy.
+  - name: Siemens
+    scan_method: jobspy
+    enabled: true
+```
+
+#### JobSpy Searches (LinkedIn, Indeed, Google Jobs)
+
+Each entry is a separate search query. Add as many as you need:
+
+```yaml
+jobspy_searches:
+  - term: "Working Student"
+    location: "Erlangen, Germany"
+    sites: ["indeed", "linkedin", "google"]
+    results_wanted: 50
+    distance_km: 50
+    enabled: true
+
+  - term: "Werkstudent"
+    location: "Erlangen, Germany"
+    sites: ["indeed", "linkedin", "google"]
+    results_wanted: 50
+    distance_km: 50
+    enabled: true
+
+  - term: "Working Student"
+    location: "Munich, Germany"
+    sites: ["indeed", "linkedin", "google"]
+    results_wanted: 30
+    enabled: true
+
+  - term: "Student Assistant"
+    location: "Erlangen, Germany"
+    sites: ["indeed", "google"]
+    results_wanted: 20
+    distance_km: 30
+    enabled: true
 ```
 
 ---
@@ -321,7 +418,7 @@ job_apply/
 │   └── scan-history.tsv       #   All seen jobs with status
 ├── output/                    #   Generated CVs (.md + .pdf) and cover letters
 ├── reports/                   #   Evaluation reports per job
-├── tests/                     #   36 tests (dedup, filters, bridge)
+├── tests/                     #   91 tests (dedup, filters, bridge, German policies)
 ├── cv.md                      #   Your base CV (see format above)
 ├── .env.example               #   Template for API keys
 ├── run_scan.py                #   Scanner entry point
