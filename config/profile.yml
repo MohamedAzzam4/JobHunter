@@ -58,6 +58,15 @@ evaluation:
   # reject_unless_bilingual  = reject German jobs UNLESS the JD also requires English
   # accept_all              = don't auto-reject any German level
   german_filter: reject_b1_plus
-  model_primary: "google/gemma-4-31b-it:free"
-  model_backup: "nvidia/nvidia-nemotron-3-super:free"
-  model_fallback: "openai/gpt-oss-120b:free"
+  # OpenRouter model chain (tried in order; first success wins)
+  # See https://openrouter.ai/models for available free models
+  openrouter_models:
+    - "openai/gpt-oss-120b:free"             # Primary — reliable, slightly slow
+    - "google/gemma-4-31b-it:free"           # Backup — fast but rate-limited
+    - "deepseek/deepseek-v4-flash:free"      # Fallback 1
+    - "arcee-ai/trinity-large-thinking:free" # Fallback 2
+    - "baidu/cobuddy:free"                   # Fallback 3
+  # Google AI Studio models (for evaluation, separate from OpenRouter)
+  google_models:
+    - "gemma-4-26b-a4b-it"                   # Primary — more reliable
+    - "gemma-4-31b-it"                       # Backup

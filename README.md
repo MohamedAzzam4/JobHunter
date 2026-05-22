@@ -278,20 +278,18 @@ location_filter:
 
 #### Tracked Companies
 
-Companies scanned via direct API. Only `scan_method: workday` entries are actively scanned — others (`websearch`) are placeholders for future implementation:
+Companies scanned via direct API. Only `scan_method: workday` entries are actively scanned. Companies using Eightfold.ai (Adidas, Puma, Siemens) are discovered via JobSpy instead:
 
 ```yaml
 tracked_companies:
   - name: Adidas
     careers_url: "https://careers.adidas-group.com"
-    scan_method: workday
-    search_terms: ["working student", "werkstudent"]
+    scan_method: jobspy   # Eightfold.ai — no direct API, covered by JobSpy
     enabled: true
 
   - name: Puma
     careers_url: "https://careers.puma.com"
-    scan_method: workday
-    search_terms: ["working student"]
+    scan_method: jobspy   # Eightfold.ai — no direct API, covered by JobSpy
     enabled: true
 
   - name: Bosch
@@ -300,8 +298,6 @@ tracked_companies:
     search_terms: ["working student"]
     enabled: true
 
-  # Companies with scan_method: websearch are informational placeholders.
-  # No websearch scanner exists yet — these companies are covered by JobSpy.
   - name: Siemens
     scan_method: jobspy
     enabled: true
@@ -309,37 +305,24 @@ tracked_companies:
 
 #### JobSpy Searches (LinkedIn, Indeed, Google Jobs)
 
-Each entry is a separate search query. Add as many as you need:
+Define your search terms and locations as separate lists. The scanner **automatically generates the cross-product** — every term is searched in every location. To add a new city or keyword, just append it to the list:
 
 ```yaml
+# 3 terms × 2 locations = 6 searches automatically
 jobspy_searches:
-  - term: "Working Student"
-    location: "Erlangen, Germany"
-    sites: ["indeed", "linkedin", "google"]
-    results_wanted: 50
-    distance_km: 50
-    enabled: true
-
-  - term: "Werkstudent"
-    location: "Erlangen, Germany"
-    sites: ["indeed", "linkedin", "google"]
-    results_wanted: 50
-    distance_km: 50
-    enabled: true
-
-  - term: "Working Student"
-    location: "Munich, Germany"
-    sites: ["indeed", "linkedin", "google"]
-    results_wanted: 30
-    enabled: true
-
-  - term: "Student Assistant"
-    location: "Erlangen, Germany"
-    sites: ["indeed", "google"]
-    results_wanted: 20
-    distance_km: 30
-    enabled: true
+  terms:
+    - "Working Student"
+    - "Werkstudent"
+    - "Student Assistant"
+  locations:
+    - "Erlangen, Germany"
+    - "Munich, Germany"
+  sites: ["indeed", "linkedin", "google"]
+  results_wanted: 50
+  distance_km: 50
 ```
+
+> The legacy per-entry format (list of individual search blocks) is still supported for backward compatibility.
 
 ---
 

@@ -50,7 +50,7 @@ tracked_companies:
 
   - name: Adidas
     careers_url: "https://careers.adidas-group.com"
-    scan_method: workday
+    scan_method: jobspy   # Eightfold.ai — no direct API, covered by JobSpy
     search_terms:
       - "working student"
       - "werkstudent"
@@ -59,7 +59,7 @@ tracked_companies:
 
   - name: Puma
     careers_url: "https://careers.puma.com"
-    scan_method: workday
+    scan_method: jobspy   # Eightfold.ai — no direct API, covered by JobSpy
     search_terms:
       - "working student"
     notes: "Herzogenaurach"
@@ -108,30 +108,18 @@ tracked_companies:
     notes: "Your university — HiWi positions."
     enabled: true
 
+# ── JobSpy Search Configuration ──
+# The scanner generates the cross-product of terms × locations.
+# Example: 3 terms × 2 locations = 6 searches automatically.
+# To add a new city or keyword, just append it to the list.
 jobspy_searches:
-  - term: "Working Student"
-    location: "Erlangen, Germany"
-    sites: ["indeed", "linkedin", "google"]
-    results_wanted: 50
-    distance_km: 50
-    enabled: true
-
-  - term: "Werkstudent"
-    location: "Erlangen, Germany"
-    sites: ["indeed", "linkedin", "google"]
-    results_wanted: 50
-    distance_km: 50
-    enabled: true
-
-  - term: "Working Student"
-    location: "Munich, Germany"
-    sites: ["indeed", "linkedin", "google"]
-    results_wanted: 30
-    enabled: true
-
-  - term: "Student Assistant"
-    location: "Erlangen, Germany"
-    sites: ["indeed", "google"]
-    results_wanted: 20
-    distance_km: 30
-    enabled: true
+  terms:
+    - "Working Student"
+    - "Werkstudent"
+    - "Student Assistant"
+  locations:
+    - "Erlangen, Germany"
+    - "Munich, Germany"
+  sites: ["indeed", "linkedin", "google"]
+  results_wanted: 50
+  distance_km: 50
