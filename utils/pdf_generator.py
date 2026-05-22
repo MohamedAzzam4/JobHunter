@@ -490,3 +490,135 @@ def generate_cv_pdf(
             "success": False,
             "error": str(e),
         }
+
+
+def _md_to_html_cover_letter(md_content: str, candidate_name: str = "",
+                              company: str = "", role: str = "",
+                              contact: str = "") -> str:
+    """Convert cover letter markdown to a clean, professional HTML page."""
+    # Convert markdown paragraphs to HTML
+    paragraphs = []
+    for para in md_content.strip().split("\n\n"):
+        para = para.strip()
+        if not para:
+            continue
+        # Convert inline markdown
+        para = _md_inline(para)
+        # Join lines within a paragraph
+        para = para.replace("\n", " ")
+        paragraphs.append(f"<p>{para}</p>")
+
+    body = "\n".join(paragraphs)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page {{
+            size: A4;
+            margin: 20mm 25mm;
+        }}
+        body {{
+            font-family: Arial, Helvetica, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            font-size: 11pt;
+        }}
+        .header {{
+            border-bottom: 2px solid #2c3e50;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }}
+        .name {{
+            font-size: 18pt;
+            font-weight: bold;
+            color: #2c3e50;
+            margin: 0;
+        }}
+        .contact {{
+            font-size: 9pt;
+            color: #666;
+            margin: 4px 0 0 0;
+        }}
+        .meta {{
+            margin-bottom: 20px;
+            font-size: 10pt;
+            color: #555;
+        }}
+        p {{
+            font-size: 11pt;
+            margin: 0 0 12px 0;
+            text-align: justify;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1 class="name">{candidate_name}</h1>
+        <p class="contact">{contact}</p>
+    </div>
+    <div class="meta">
+        <strong>Re:</strong> {role} — {company}
+    </div>
+    {body}
+</body>
+</html>"""
+
+
+def generate_cover_letter_pdf(
+    md_content: str,
+    output_path: str,
+    company: str = "",
+    role: str = "",
+) -> dict:
+    """Generate a PDF cover letter from markdown content.
+
+    Args:
+        md_content: Cover letter text (plain text / light markdown)
+        output_path: Where to save the PDF
+        company: Company name for the header
+        role: Job title for the header
+
+    Returns:
+        Dict with success status and path
+    """
+    candidate = _load_candidate_info()
+    candidate_name = candidate.get("full_name", "Candidate")
+    parts = [candidate.get("location", ""), candidate.get("email", ""), candidate.get("phone", "")]
+    contact = " | ".join(p for p in parts if p)
+
+    try:
+        from weasyprint import HTML
+    except ImportError:
+        return {
+            "success": False,
+            "error": "weasyprint not installed. Run: pip install weasyprint",
+        }
+
+    try:
+        html = _md_to_html_cover_letter(
+            md_content, candidate_name, company, role, contact,
+        )
+
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        HTML(string=html).write_pdf(output_path)
+
+        file_size = Path(output_path).stat().st_size
+        logger.info("Cover letter PDF generated: %s (%d bytes)", output_path, file_size)
+
+        return {
+            "success": True,
+            "output_path": output_path,
+            "size_bytes": file_size,
+        }
+
+    except Exception as e:
+        logger.error("Cover letter PDF generation failed: %s", e)
+        return {
+            "success": False,
+            "error": str(e),
+        }
+

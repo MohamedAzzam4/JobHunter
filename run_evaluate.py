@@ -27,7 +27,7 @@ from agents.cv_tailor import CVTailor
 from agents.cover_letter import CoverLetterWriter
 from utils.jd_fetcher import fetch_jd, fetch_jd_playwright
 from utils.telegram import TelegramNotifier
-from utils.pdf_generator import generate_cv_pdf
+from utils.pdf_generator import generate_cv_pdf, generate_cover_letter_pdf
 from utils.jd_cache import JDCache
 
 # Setup logging
@@ -312,9 +312,30 @@ async def evaluate_job(
         send_path = pdf_path or evaluation.get("cv_path")
         telegram.notify_cv_generated(evaluation, send_path)
 
-        # Send cover letter via Telegram
+        # Generate cover letter PDF
+        cover_pdf_path = None
+        if cover_result.get("success"):
+            cover_pdf_out = cover_result["output_path"].replace("-cover.md", "-cover.pdf")
+            try:
+                cl_pdf_result = generate_cover_letter_pdf(
+                    md_content=cover_result.get("content", ""),
+                    output_path=cover_pdf_out,
+                    company=company,
+                    role=title,
+                )
+                if cl_pdf_result.get("success"):
+                    cover_pdf_path = cl_pdf_result["output_path"]
+                    evaluation["cover_letter_pdf_path"] = cover_pdf_path
+                    logger.info(f"Cover letter PDF: {cover_pdf_path}")
+                else:
+                    logger.warning(f"Cover letter PDF failed: {cl_pdf_result.get('error')}")
+            except Exception as e:
+                logger.warning(f"Cover letter PDF skipped (WeasyPrint not available): {e}")
+
+        # Send cover letter via Telegram (PDF if available, otherwise markdown)
         if evaluation.get("cover_letter_path"):
-            telegram.notify_cover_letter(evaluation, evaluation["cover_letter_path"])
+            send_cover_path = cover_pdf_path or evaluation["cover_letter_path"]
+            telegram.notify_cover_letter(evaluation, send_cover_path)
     else:
         if evaluation.get("recommendation") == "skip_german":
             logger.info(f"German required -> Skipping CV/cover letter generation")
