@@ -151,7 +151,7 @@ class PipelineBridge:
         for job in jobs:
             url = job.get("url", "")
             company = job.get("company", "Unknown").replace("|", "-")
-            title = job.get("title", "Unknown")
+            title = job.get("title", "Unknown").replace("|", "-")
             location = job.get("location", "")
             loc_suffix = f" [{location}]" if location else ""
             lines.append(f"- [ ] {url} | {company} | {title}{loc_suffix}")
