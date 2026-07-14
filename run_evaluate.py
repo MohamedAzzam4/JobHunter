@@ -29,12 +29,14 @@ from utils.jd_fetcher import fetch_jd, fetch_jd_playwright
 from utils.telegram import TelegramNotifier
 from utils.pdf_generator import generate_cv_pdf, generate_cover_letter_pdf
 from utils.jd_cache import JDCache
+from utils.utf8_logging import get_utf8_stream_handler
 
-# Setup logging
+# Setup logging — use UTF-8 safe handler so job titles containing chars
+# like \ufeff (BOM) do not crash logging on Windows cp1252 consoles.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=[get_utf8_stream_handler(sys.stdout)],
 )
 logger = logging.getLogger("evaluate")
 

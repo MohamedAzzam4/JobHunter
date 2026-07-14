@@ -23,10 +23,12 @@ from dotenv import load_dotenv
 from run_scan import run_scan
 from run_evaluate import run_evaluate
 
+from utils.utf8_logging import get_utf8_stream_handler
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=[get_utf8_stream_handler(sys.stdout)],
 )
 logger = logging.getLogger("pipeline")
 
