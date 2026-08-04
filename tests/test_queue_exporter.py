@@ -174,17 +174,18 @@ class TestExtractCandidateProfile:
         assert "github.com/MohamedAzzam4" in sample_profile_snapshot["github_url"]
 
     def test_empty_profile(self) -> None:
+        # Truthfulness policy: nothing present -> nothing exported (no
+        # invented ``False`` sponsorship, no blank personal fields).
         snap = extract_candidate_profile_snapshot({})
-        assert snap["first_name"] == ""
-        assert snap["email"] == ""
-        assert snap["requires_sponsorship"] is False
+        assert snap == {}
 
     def test_location_without_comma(self) -> None:
         snap = extract_candidate_profile_snapshot(
             {"candidate": {"location": "Berlin"}}
         )
         assert snap["city"] == "Berlin"
-        assert snap["country"] == ""
+        # Truthfulness: no country present -> omitted, never blank.
+        assert "country" not in snap
 
 
 # ---------------------------------------------------------------------------

@@ -365,6 +365,86 @@ python run_evaluate.py --batch 10 --threshold 4.0 --german-policy reject_b2_plus
 
 These flags override the values in `config/profile.yml` for that run only.
 
+## Application Queue Export (UniversalAutoApplier handoff)
+
+After a successful `scan → evaluate → document generation` cycle, `run_all.py`
+publishes a ready-to-apply queue consumed by
+[UniversalAutoApplier](https://github.com/MohamedAzzam4/UniversalAutoApplier).
+
+The queue is written atomically to `data/application_queue.jsonl` (one
+`ApplicationJob` per line, matching UAA's JSONL contract):
+
+- **Only eligible jobs are exported** — every excluded job is counted with a
+  structured skip reason so the handoff is auditable:
+
+  | Skip reason | Meaning |
+  |---|---|
+  | `evaluation_failed` | The evaluation itself errored |
+  | `missing_url` | Record has no URL (also the identity fallback) |
+  | `invalid_url` | URL scheme is not HTTP(S) or has no hostname (UAA rejects it) |
+  | `invalid_score` | `global_score` is not numeric |
+  | `below_threshold` | Score below `evaluation.auto_cv_threshold` |
+  | `not_recommended` | Recommendation is not `apply` |
+  | `duplicate_url` | Same URL already exported once in this queue |
+  | `missing_required_fields` | Missing company/title (never fabricated) |
+  | `missing_documents` | CV/cover-letter PDFs not referenced by the record |
+  | `document_not_found` | Referenced PDF does not exist on disk |
+  | `duplicate_application_id` | Same `application_id` already exported once |
+
+- **Deterministic & idempotent** — identical input produces byte-identical
+  output (no timestamps) and re-running replaces the file (never appends).
+- **Atomic** — the queue is written to a temp file in the destination
+  directory and swapped with `os.replace`. A failed export leaves the previous
+  queue intact **and fails the pipeline** instead of silently shipping a stale
+  queue.
+- **Exact identity match** — `application_id` is `sha256(platform:external_id)`
+  when the external id is set and non-blank, else `sha256(canonical URL)`.
+  The canonical URL mirrors UAA `core/identity.py` in full: lowercase scheme
+  and host only, userinfo preserved, fragment + default ports + trailing slash
+  removed (except host root), `utm_*`/tracking keys stripped case-insensitively
+  while **kept keys keep their original case** (e.g. `jobId`), remaining query
+  pairs sorted by key then value. Fixed golden SHA-256 vectors pin this in
+  `tests/test_identity_golden_contract.py`.
+- **Safe external-ID normalization** — the raw external id accepts non-boolean
+  strings and integers (`512492` and `"512492"` produce the same identity,
+  and `"0"`/`0` are valid ids, never lost to truthiness). Whitespace-only
+  values, `None`, booleans, dicts, lists, and other unsupported types are
+  treated as **absent**: identity falls back to the canonical URL and the
+  emitted `external_job_id` is `null` — the export never crashes on a bad id
+  and never emits a field UAA would reject.
+- **Truthful candidate snapshot** — `metadata.candidate_profile` carries only
+  values explicitly present in `config/profile.yml`. Absent/null/blank values
+  are omitted; `requires_sponsorship` is exported only when the profile
+  explicitly stores a real boolean; nothing is invented (no `website`,
+  `work_authorization`, or `years_of_experience`, and no forced `False`).
+- **Never invents facts** — missing company/title skips the job rather than
+  emitting `"Unknown"`, and `tailored_at` is not fabricated (the current
+  pipeline never persists it).
+
+Export only happens after the evaluation stage succeeded (`run_all.py` skips
+it in `--dry-run`, `--scan-only`, and no-new-jobs paths). You can also run the
+export standalone:
+
+```bash
+python run_export_queue.py                          # default: data/application_queue.jsonl
+python run_export_queue.py --threshold 4.0          # override threshold for this run
+python run_export_queue.py --output /custom/path.jsonl
+```
+
+Set the destination under `queue_export.output_path` in `config/profile.yml`
+(default `data/application_queue.jsonl`).
+
+**Known limitations (WQ-2):** this pipeline has no standalone
+document-generation stage — tailored CV and cover letter are generated inside
+`run_evaluate.py` when the score clears the threshold. Evaluations are now
+persisted to `data/evaluations.json` **after** document generation so the
+record carries the produced PDF paths. A **partial candidate snapshot** is
+safe but may cause UniversalAutoApplier to raise interventions for missing
+facts (e.g. visa/sponsorship): JobHunter deliberately never answers with
+invented values, and solving UAA's profile-merging behavior is a UAA-side
+workpackage. Nothing in this repository consumes the queue yet; importing it
+into UniversalAutoApplier is a later workpackage.
+
 ## Architecture
 
 ```
@@ -388,7 +468,8 @@ job_apply/
 │   ├── jd_cache.py            #   Cache JDs from scan time (solves Indeed 403)
 │   ├── jd_fetcher.py          #   Fetch job descriptions via HTTP/Playwright
 │   ├── filters.py             #   Title and location filtering
-│   └── dedup.py               #   URL + company/role deduplication
+│   ├── dedup.py               #   URL + company/role deduplication
+│   └── queue_exporter.py      #   Atomic, deterministic application queue export
 ├── config/
 │   ├── profile.yml            #   Candidate info, skills, thresholds
 │   └── portals.yml            #   Search queries and job sites
@@ -398,15 +479,16 @@ job_apply/
 │   ├── jobs_database.xlsx     #   All evaluated jobs (Excel)
 │   ├── below_threshold.md     #   Low-scoring jobs for review
 │   ├── applications.md        #   Evaluation tracker
+│   ├── application_queue.jsonl #   UAA-ready queue (written atomically)
 │   └── scan-history.tsv       #   All seen jobs with status
 ├── output/                    #   Generated CVs (.md + .pdf) and cover letters
 ├── reports/                   #   Evaluation reports per job
-├── tests/                     #   91 tests (dedup, filters, bridge, German policies)
+├── tests/                     #   180 tests (dedup, filters, bridge, German policies, queue export)
 ├── cv.md                      #   Your base CV (see format above)
 ├── .env.example               #   Template for API keys
 ├── run_scan.py                #   Scanner entry point
 ├── run_evaluate.py            #   Evaluator entry point
-├── run_all.py                 #   Full pipeline (scan + evaluate)
+├── run_all.py                 #   Full pipeline (scan + evaluate + export queue)
 └── requirements.txt
 ```
 
