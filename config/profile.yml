@@ -70,3 +70,10 @@ evaluation:
   google_models:
     - "gemma-4-26b-a4b-it"                   # Primary — more reliable
     - "gemma-4-31b-it"                       # Backup
+
+queue_export:
+  # UniversalAutoApplier-ready application queue (JSONL). Written atomically
+  # by run_all.py after a successful scan + evaluate + doc-generation run.
+  # Re-running overwrites the file (idempotent); a failed export fails the
+  # pipeline and leaves the previous queue untouched.
+  output_path: data/application_queue.jsonl
