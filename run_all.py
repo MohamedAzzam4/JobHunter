@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from run_scan import run_scan
 from run_evaluate import run_evaluate
 
+from utils.queue_exporter import export_queue
 from utils.utf8_logging import get_utf8_stream_handler
 
 logging.basicConfig(
@@ -78,6 +79,22 @@ async def run_pipeline(dry_run: bool = False, scan_only: bool = False, threshold
     logger.info(f"\n[EVAL] PHASE 2: Evaluating {new_jobs} new job(s)...")
     eval_results = await run_evaluate(mode="all", threshold_override=threshold_override, german_policy=german_policy)
 
+    # Phase 2.5: Publish the application queue for UniversalAutoApplier.
+    # Runs only after scan + evaluate succeeded. A failed export fails the
+    # pipeline (never leave a silently stale queue behind).
+    logger.info("\n[EXPORT] PHASE 2.5: Publishing application_queue.jsonl...")
+    export_summary = export_queue(threshold=threshold)
+    logger.info(
+        "[EXPORT] Published %d job(s) to %s (skipped %d)",
+        export_summary["exported"],
+        export_summary["output_path"],
+        export_summary["skipped"],
+    )
+    skipped_reasons = export_summary.get("skipped_reasons", {})
+    if skipped_reasons:
+        reasons = ", ".join(f"{k}={v}" for k, v in sorted(skipped_reasons.items()))
+        logger.info("[EXPORT] Skip reasons: %s", reasons)
+
     # Phase 3: Summary
     elapsed = (datetime.now() - start).total_seconds()
     successful_evals = [r for r in eval_results if r.get("success")]
@@ -91,6 +108,7 @@ async def run_pipeline(dry_run: bool = False, scan_only: bool = False, threshold
     logger.info(f"  New jobs:         {new_jobs}")
     logger.info(f"  Evaluated:        {len(successful_evals)}")
     logger.info(f"  Score >= {threshold}:     {len(high_scores)} (CV + cover letter generated)")
+    logger.info(f"  Queue exported:   {export_summary['exported']} job(s) -> {export_summary['output_path']}")
 
     if high_scores:
         logger.info("\nTop matches:")

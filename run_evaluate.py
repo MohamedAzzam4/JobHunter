@@ -277,15 +277,6 @@ async def evaluate_job(
     except Exception as e:
         logger.debug(f"Excel export skipped: {e}")
 
-    # 3c. Append to JSON evaluations store (canonical input for the UAA
-    # queue exporter). This is the persistence hook that connects
-    # run_evaluate.py -> run_export_queue.py -> application_queue.jsonl.
-    try:
-        from utils.evaluation_store import append_evaluation
-        append_evaluation(evaluation)
-    except Exception as e:
-        logger.debug(f"JSON evaluation store skipped: {e}")
-
     # 4. Generate CV + Cover Letter if score >= threshold
     pdf_path = None
     if score >= threshold:
@@ -358,6 +349,17 @@ async def evaluate_job(
             logger.info(f"Score {score} < {threshold} -> Skipping CV/cover letter generation")
         # Log below-threshold for review
         log_below_threshold(evaluation, threshold)
+
+    # 4b. Append to JSON evaluations store (canonical input for the UAA
+    # queue exporter). Persisted AFTER document generation so the record
+    # carries the generated cv_pdf_path / cover_letter_pdf_path values.
+    # This is the persistence hook that connects
+    # run_evaluate.py -> run_export_queue.py -> application_queue.jsonl.
+    try:
+        from utils.evaluation_store import append_evaluation
+        append_evaluation(evaluation)
+    except Exception as e:
+        logger.debug(f"JSON evaluation store skipped: {e}")
 
     # 5. Mark as checked in pipeline
     mark_job_checked(job["url"])
