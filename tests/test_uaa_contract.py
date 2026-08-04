@@ -214,3 +214,44 @@ class TestUaaContract:
         assert uaa_application_id("greenhouse", "   ", "https://x.io/jobs/1") == uaa_application_id(
             "greenhouse", None, "https://x.io/jobs/1"
         )
+
+    def test_int_external_job_id_normalized_in_exported_jsonl(self, tmp_path: Path) -> None:
+        # An integer external id must be normalized to a string in the emitted
+        # JSONL and its application_id must pass the independent UAA recompute.
+        cv = tmp_path / "cv.pdf"
+        cover = tmp_path / "cover.pdf"
+        cv.write_bytes(b"%PDF-1.4 fake")
+        cover.write_bytes(b"%PDF-1.4 fake")
+
+        url = "https://boards.greenhouse.io/acme/jobs/512492"
+        evaluation = {
+            "success": True,
+            "url": url,
+            "company": "Acme",
+            "title": "Engineer",
+            "global_score": 4.5,
+            "recommendation": "apply",
+            "cv_pdf_path": str(cv),
+            "cover_letter_pdf_path": str(cover),
+            "external_job_id": 512492,
+        }
+        evals_path = tmp_path / "evaluations.json"
+        evals_path.write_text(json.dumps([evaluation]), encoding="utf-8")
+        profile_path = tmp_path / "profile.yml"
+        profile_path.write_text(yaml.safe_dump(PROFILE), encoding="utf-8")
+        output_path = tmp_path / "application_queue.jsonl"
+
+        export_queue(
+            output_path=output_path,
+            evaluations_path=evals_path,
+            pipeline_path=tmp_path / "nonexistent.md",
+            profile_path=profile_path,
+            threshold=3.5,
+        )
+
+        lines = output_path.read_text(encoding="utf-8").strip().splitlines()
+        assert len(lines) == 1
+        row = json.loads(lines[0])
+        assert isinstance(row["external_job_id"], str)
+        assert row["external_job_id"] == "512492"
+        assert row["application_id"] == uaa_application_id("greenhouse", "512492", url)

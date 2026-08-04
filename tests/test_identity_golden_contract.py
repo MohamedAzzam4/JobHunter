@@ -96,6 +96,10 @@ MIXED_CASE_HOST_ID = "4fa6840b3f2ab89dfee52c604951849e41a7038da1d827e060f5cad281
 USERINFO_ID = "1827a247f43f9ba06876965700f408fd4bae47989c8ecd191b73a793514df3dd"
 # sha256(canonical("https://x.io:8443/jobs/1?tag=a&tag=b"))
 NON_DEFAULT_PORT_ID = "58aabbb0df158f74fd1e5826021d57c4101e47709425fc0f9c0b8357687fccbe"
+# sha256("greenhouse:512492") and sha256("greenhouse:0") — integer external
+# IDs are normalized to their string form under the UAA lax-str contract.
+GOLDEN_INT_512492 = "79fdfd9ff4df4f4721b70b1f86c3fe39b4750de91a28c4c28a6a5eb0201af0aa"
+GOLDEN_ZERO = "510564db0eee056738c87fa296a58d28e8999140ece01f70b530a295fc7b9f43"
 
 
 class TestGoldenCanonicalUrl:
@@ -146,6 +150,29 @@ class TestGoldenApplicationId:
         ftp_id = _compute_application_id("greenhouse", "ext-77", "ftp://x.io/jobs/1")
         https_id = _compute_application_id("greenhouse", "ext-77", "https://x.io/jobs/1")
         assert ftp_id == https_id
+
+    def test_integer_job_id_matches_string_contract(self) -> None:
+        # An int external id must produce the same SHA-256 as its string form
+        # (UAA's lax str coercion turns 512492 into "512492").
+        int_id = _compute_application_id("greenhouse", 512492, "https://x.io/jobs/1")
+        str_id = _compute_application_id("greenhouse", "512492", "https://x.io/jobs/1")
+        assert int_id == GOLDEN_INT_512492
+        assert int_id == str_id
+
+    def test_numeric_zero_is_valid_and_deterministic(self) -> None:
+        # numeric 0 must NOT be lost to truthiness: it becomes the valid id
+        # "0" and never falls back to the URL.
+        zero_id = _compute_application_id("greenhouse", 0, "https://x.io/jobs/2")
+        str_zero_id = _compute_application_id("greenhouse", "0", "https://x.io/jobs/2")
+        assert zero_id == GOLDEN_ZERO
+        assert zero_id == str_zero_id
+        assert zero_id != URL_FALLBACK  # did NOT degrade to canonical-URL identity
+
+    def test_bool_list_dict_float_never_crash_and_fall_back_to_url(self) -> None:
+        # Unsupported external-id values degrade to canonical-URL identity
+        # instead of crashing the export.
+        for bad in (True, False, ["x"], {"a": 1}, 3.14):
+            assert _compute_application_id("greenhouse", bad, "https://x.io/jobs/2") == URL_FALLBACK
 
 
 class TestGoldenContractInExportedRow:
@@ -212,3 +239,59 @@ class TestGoldenContractInExportedRow:
         rows, skipped = build_queue_entries(evals, {}, {}, threshold=3.5)
         assert rows == []
         assert [r["reason"] for r in skipped] == [INVALID_URL]
+
+    @staticmethod
+    def _export_single(tmp_path: Path, evaluation: dict) -> list[dict]:
+        cv = tmp_path / "cv.pdf"
+        cover = tmp_path / "cover.pdf"
+        cv.write_bytes(b"%PDF-1.4 fake")
+        cover.write_bytes(b"%PDF-1.4 fake")
+        evaluation.setdefault("success", True)
+        evaluation.setdefault("company", "Acme")
+        evaluation.setdefault("title", "Engineer")
+        evaluation.setdefault("global_score", 4.5)
+        evaluation.setdefault("recommendation", "apply")
+        evaluation.setdefault("cv_pdf_path", str(cv))
+        evaluation.setdefault("cover_letter_pdf_path", str(cover))
+        evals_path = tmp_path / "evaluations.json"
+        evals_path.write_text(json.dumps([evaluation]), encoding="utf-8")
+        profile_path = tmp_path / "profile.yml"
+        profile_path.write_text(yaml.safe_dump(PROFILE), encoding="utf-8")
+        output_path = tmp_path / "application_queue.jsonl"
+        export_queue(
+            output_path=output_path,
+            evaluations_path=evals_path,
+            pipeline_path=tmp_path / "nope.md",
+            profile_path=profile_path,
+            threshold=3.5,
+        )
+        return [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
+
+    def test_exported_int_external_id_normalized_to_string(self, tmp_path: Path) -> None:
+        rows = self._export_single(
+            tmp_path, {"url": "https://boards.greenhouse.io/example/jobs/1001", "external_job_id": 512492}
+        )
+        assert len(rows) == 1
+        row = rows[0]
+        # Emitted field is the normalized string, never the integer.
+        assert row["external_job_id"] == "512492"
+        assert row["application_id"] == GOLDEN_INT_512492  # sha256("greenhouse:512492")
+
+    def test_exported_numeric_zero_external_id_valid(self, tmp_path: Path) -> None:
+        rows = self._export_single(
+            tmp_path, {"url": "https://boards.greenhouse.io/example/jobs/1003", "external_job_id": 0}
+        )
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["external_job_id"] == "0"
+        assert row["application_id"] == GOLDEN_ZERO  # sha256("greenhouse:0")
+
+    def test_exported_bool_external_id_is_null_and_url_identity(self, tmp_path: Path) -> None:
+        url = "https://boards.greenhouse.io/example/jobs/1002"
+        rows = self._export_single(tmp_path, {"url": url, "external_job_id": True})
+        assert len(rows) == 1
+        row = rows[0]
+        # Unsupported types are absent in the emitted JSONL (null, never bool)
+        # and the identity degrades to the canonical URL.
+        assert row["external_job_id"] is None
+        assert row["application_id"] == _compute_application_id(None, None, url)
