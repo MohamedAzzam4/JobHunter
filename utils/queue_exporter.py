@@ -21,7 +21,7 @@ Identity contract (must match UAA core/identity.py in full — see
 ``tests/test_identity_golden_contract.py`` for fixed golden SHAs):
 
 - ``application_id`` is ``sha256(identity_source).hexdigest()``.
-- ``identity_source`` is ``platform + ":" + external_job_id.strip()`` when
+- ``identity_source`` is ``platform + ":" + external_job_id''`` when
   BOTH are set and ``external_job_id`` is non-empty after stripping (a
   whitespace-only external id falls back to the canonical URL). Otherwise
   ``identity_source`` is the canonical URL.
@@ -31,6 +31,20 @@ Identity contract (must match UAA core/identity.py in full — see
   ``gclid, fbclid, mc_cid, mc_eid, ref, refid, trackingid`` (case-insensitive
   match, but KEPT keys keep their original case, e.g. ``jobId``); sort
   remaining query pairs by key then value and re-encode.
+
+External-ID normalization policy (JobHunter/UAA boundary):
+
+- The raw ``external_job_id`` (or ``job_id`` as the fallback source ONLY when
+  ``external_job_id`` is entirely absent) accepts non-boolean strings and
+  integers. Valid values are converted to a stripped non-empty string;
+  ``"0"`` and numeric ``0`` are valid IDs (``0`` is NOT lost to truthiness).
+  An integer ``512492`` produces the same identity as the string ``"512492"``
+  (UAA's lax ``str`` coercion of the field agrees).
+- Whitespace-only strings, ``None``, ``bool``, ``dict``, ``list``, ``float``,
+  and any other unsupported value become ABSENT: identity falls back to the
+  canonical URL, and the emitted ``external_job_id`` field is ``null`` (never
+  an int/bool/collection/whitespace-only string UAA might reject). Malformed
+  identifiers are therefore never a crash — they degrade to URL identity.
 
 Candidate snapshot truthfulness:
 
@@ -373,13 +387,44 @@ def canonicalize_url(url: str) -> str:
     return urlunsplit((scheme, netloc, path, query, ""))
 
 
-def _compute_application_id(platform: str, external_job_id: str | None, url: str) -> str:
+def _normalize_external_job_id(value: Any) -> str | None:
+    """Normalize a raw external job ID at the JobHunter/UAA boundary.
+
+    Policy (documented in the module docstring and README):
+
+    - ``str`` (non-boolean): returned stripped; a whitespace-only string
+      yields ``None`` (absent).
+    - ``int`` (non-boolean): returned as ``str(value)`` — ``0`` becomes the
+      valid ID ``"0"`` (never lost via truthiness); ``512492`` -> ``"512492"``
+      exactly as UAA's lax ``str`` coercion would.
+    - ``None``: ``None`` (absent).
+    - Anything else (``bool``, ``dict``, ``list``, ``float``): ``None``
+      (absent). A malformed ID never crashes the export — it degrades to
+      canonical-URL identity.
+
+    Returns:
+        A stripped, non-empty string, or ``None`` when the value must be
+        treated as absent.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if isinstance(value, int):
+        return str(value)
+    return None
+
+
+def _compute_application_id(platform: str, external_job_id: Any, url: str) -> str:
     """Compute the deterministic application_id (mirror of UAA identity.py).
 
-    Identity source is ``platform + ":" + external_job_id.strip()`` when BOTH
-    are set and ``external_job_id`` remains non-empty after stripping
-    (whitespace-only falls back to the canonical URL). Otherwise the identity
-    source is the canonical URL.
+    Identity source is ``platform + ":" + external_id`` when BOTH are set and
+    the external id is a normalized, non-empty string (whitespace-only or
+    unsupported values fall back to the canonical URL). The raw external id
+    is normalized first via :func:`_normalize_external_job_id`, so an integer
+    (e.g. 512492 or 0) produces the same identity as its string form — never
+    an ``AttributeError``.
 
     Returns:
         Lowercase SHA-256 hexdigest string.
@@ -391,8 +436,9 @@ def _compute_application_id(platform: str, external_job_id: str | None, url: str
     """
     import hashlib
 
-    if platform and external_job_id and external_job_id.strip():
-        identity_source = f"{platform}:{external_job_id.strip()}"
+    normalized_id = _normalize_external_job_id(external_job_id)
+    if platform and normalized_id:
+        identity_source = f"{platform}:{normalized_id}"
     else:
         identity_source = canonicalize_url(url)
     return hashlib.sha256(identity_source.encode("utf-8")).hexdigest()
@@ -635,7 +681,17 @@ def build_queue_entries(
         source = pipeline_info.get("source", _detect_source(url))
         platform = _detect_platform(url)
 
-        external_job_id = evaluation.get("external_job_id") or evaluation.get("job_id")
+        # External-ID normalization at the JobHunter/UAA boundary. The raw
+        # value may be an integer (e.g. 512492 or 0), a string, or an
+        # unsupported type; _normalize_external_job_id turns it into a
+        # stripped non-empty string or None (never a crash, never a thrown
+        # id that UAA would reject). ``job_id`` is the fallback source only
+        # when ``external_job_id`` is entirely absent.
+        raw_external_job_id = evaluation.get("external_job_id")
+        if raw_external_job_id is None:
+            raw_external_job_id = evaluation.get("job_id")
+        external_job_id = _normalize_external_job_id(raw_external_job_id)
+
         try:
             application_id = _compute_application_id(platform, external_job_id, url)
         except ValueError as exc:
