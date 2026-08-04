@@ -50,19 +50,30 @@ PROFILE = {"candidate": {"full_name": "Test User", "location": "Erlangen, German
 
 
 def uaa_canonical_url(url: str) -> str:
-    """Mirror UAA core/identity.py canonicalization: lowercase scheme+host,
-    strip fragment + default ports + trailing slash (except host root),
-    drop utm_* / tracking query params (case-insensitive), sort the rest."""
+    """Independently mirror UAA core/identity.py canonicalization.
+
+    Lowercase scheme+host ONLY; preserve userinfo; drop the fragment and
+    default ports + trailing slash (except host root); strip utm_* /
+    tracking query keys case-insensitively while preserving the original
+    case of every kept key (e.g. ``jobId``); sort the rest by (key, value).
+    """
     parts = urlsplit(url)
     scheme = parts.scheme.lower()
+    if scheme not in ("http", "https"):
+        raise ValueError(f"URL must be HTTP or HTTPS, got scheme {scheme!r}")
     host = (parts.hostname or "").lower()
-    path = parts.path or ""
-    if len(path) > 1 and path.endswith("/"):
-        path = path.rstrip("/")
     port = parts.port
     netloc = host
-    if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+    if port is not None and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
         netloc = f"{host}:{port}"
+    if parts.username:
+        userinfo = parts.username
+        if parts.password:
+            userinfo = f"{userinfo}:{parts.password}"
+        netloc = f"{userinfo}@{netloc}"
+    path = parts.path
+    if len(path) > 1 and path.endswith("/"):
+        path = path.rstrip("/")
     drop_prefixes = ("utm_",)
     drop_keys = {"gclid", "fbclid", "mc_cid", "mc_eid", "ref", "refid", "trackingid"}
     kept = []
@@ -72,7 +83,7 @@ def uaa_canonical_url(url: str) -> str:
             continue
         if kl in drop_keys:
             continue
-        kept.append((kl, v))
+        kept.append((k, v))  # original case preserved
     kept.sort(key=lambda kv: (kv[0], kv[1]))
     query = urlencode(kept)
     out = f"{scheme}://{netloc}{path}"
@@ -82,9 +93,9 @@ def uaa_canonical_url(url: str) -> str:
 
 
 def uaa_application_id(platform: str, external_job_id: str | None, url: str) -> str:
-    """Mirror UAA identity computation: sha256(platform:external_id) else
-    sha256(canonical URL)."""
-    if platform and external_job_id:
+    """Mirror UAA identity computation: sha256(platform:external_id) when the
+    external id is non-empty after stripping, else sha256(canonical URL)."""
+    if platform and external_job_id and external_job_id.strip():
         identity = f"{platform}:{external_job_id.strip()}"
     else:
         identity = uaa_canonical_url(url)
@@ -194,8 +205,12 @@ class TestUaaContract:
         b = uaa_canonical_url("https://boards.greenhouse.io/acme/jobs/1?page=3")
         assert a == b
 
-    def test_uexport_greenhouse_external_id_empty_falls_back_to_url(self) -> None:
-        # Same as exporter: empty external id must behave like no external id.
+    def test_empty_external_id_falls_back_to_url_identity(self) -> None:
+        # Same as UAA/exporter: empty or whitespace-only external id must
+        # behave like no external id (canonical URL identity).
         assert uaa_application_id("greenhouse", "", "https://x.io/jobs/1") == uaa_application_id(
+            "greenhouse", None, "https://x.io/jobs/1"
+        )
+        assert uaa_application_id("greenhouse", "   ", "https://x.io/jobs/1") == uaa_application_id(
             "greenhouse", None, "https://x.io/jobs/1"
         )
