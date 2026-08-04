@@ -405,6 +405,13 @@ The queue is written atomically to `data/application_queue.jsonl` (one
   while **kept keys keep their original case** (e.g. `jobId`), remaining query
   pairs sorted by key then value. Fixed golden SHA-256 vectors pin this in
   `tests/test_identity_golden_contract.py`.
+- **Safe external-ID normalization** — the raw external id accepts non-boolean
+  strings and integers (`512492` and `"512492"` produce the same identity,
+  and `"0"`/`0` are valid ids, never lost to truthiness). Whitespace-only
+  values, `None`, booleans, dicts, lists, and other unsupported types are
+  treated as **absent**: identity falls back to the canonical URL and the
+  emitted `external_job_id` is `null` — the export never crashes on a bad id
+  and never emits a field UAA would reject.
 - **Truthful candidate snapshot** — `metadata.candidate_profile` carries only
   values explicitly present in `config/profile.yml`. Absent/null/blank values
   are omitted; `requires_sponsorship` is exported only when the profile
