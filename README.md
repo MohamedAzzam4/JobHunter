@@ -381,6 +381,7 @@ The queue is written atomically to `data/application_queue.jsonl` (one
   |---|---|
   | `evaluation_failed` | The evaluation itself errored |
   | `missing_url` | Record has no URL (also the identity fallback) |
+  | `invalid_url` | URL scheme is not HTTP(S) or has no hostname (UAA rejects it) |
   | `invalid_score` | `global_score` is not numeric |
   | `below_threshold` | Score below `evaluation.auto_cv_threshold` |
   | `not_recommended` | Recommendation is not `apply` |
@@ -396,6 +397,19 @@ The queue is written atomically to `data/application_queue.jsonl` (one
   directory and swapped with `os.replace`. A failed export leaves the previous
   queue intact **and fails the pipeline** instead of silently shipping a stale
   queue.
+- **Exact identity match** — `application_id` is `sha256(platform:external_id)`
+  when the external id is set and non-blank, else `sha256(canonical URL)`.
+  The canonical URL mirrors UAA `core/identity.py` in full: lowercase scheme
+  and host only, userinfo preserved, fragment + default ports + trailing slash
+  removed (except host root), `utm_*`/tracking keys stripped case-insensitively
+  while **kept keys keep their original case** (e.g. `jobId`), remaining query
+  pairs sorted by key then value. Fixed golden SHA-256 vectors pin this in
+  `tests/test_identity_golden_contract.py`.
+- **Truthful candidate snapshot** — `metadata.candidate_profile` carries only
+  values explicitly present in `config/profile.yml`. Absent/null/blank values
+  are omitted; `requires_sponsorship` is exported only when the profile
+  explicitly stores a real boolean; nothing is invented (no `website`,
+  `work_authorization`, or `years_of_experience`, and no forced `False`).
 - **Never invents facts** — missing company/title skips the job rather than
   emitting `"Unknown"`, and `tailored_at` is not fabricated (the current
   pipeline never persists it).
@@ -417,8 +431,12 @@ Set the destination under `queue_export.output_path` in `config/profile.yml`
 document-generation stage — tailored CV and cover letter are generated inside
 `run_evaluate.py` when the score clears the threshold. Evaluations are now
 persisted to `data/evaluations.json` **after** document generation so the
-record carries the produced PDF paths. Nothing in this repository consumes
-the queue yet; importing it into UniversalAutoApplier is a later workpackage.
+record carries the produced PDF paths. A **partial candidate snapshot** is
+safe but may cause UniversalAutoApplier to raise interventions for missing
+facts (e.g. visa/sponsorship): JobHunter deliberately never answers with
+invented values, and solving UAA's profile-merging behavior is a UAA-side
+workpackage. Nothing in this repository consumes the queue yet; importing it
+into UniversalAutoApplier is a later workpackage.
 
 ## Architecture
 
