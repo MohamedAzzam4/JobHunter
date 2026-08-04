@@ -9,11 +9,36 @@ Per ROADMAP.md WP 1.2 and DATA_CONTRACTS.md (WQ-2):
   - are recommended for apply
   - have tailored CV and cover letter artifacts (PDFs) that exist on disk
 - Do not export rejected, stale, duplicate, or already-applied jobs.
+- URL scheme must be HTTP(S) with a hostname (otherwise UAA rejects the row,
+  so such a job is skipped with ``invalid_url``).
 - Jobs excluded from export are counted and reported as structured skip
   reasons (``skipped_reasons`` / ``skipped_jobs`` in the summary) so that
   run_all can report the handoff accurately. We never fabricate values: a
   missing value or missing file skips the job with an explicit reason.
 - Output format: one JSON object per line (JSONL).
+
+Identity contract (must match UAA core/identity.py in full — see
+``tests/test_identity_golden_contract.py`` for fixed golden SHAs):
+
+- ``application_id`` is ``sha256(identity_source).hexdigest()``.
+- ``identity_source`` is ``platform + ":" + external_job_id.strip()`` when
+  BOTH are set and ``external_job_id`` is non-empty after stripping (a
+  whitespace-only external id falls back to the canonical URL). Otherwise
+  ``identity_source`` is the canonical URL.
+- Canonical URL: lowercase scheme and host only; preserve userinfo exactly;
+  drop the fragment and default ports (80/443); drop a trailing slash except
+  at the host root; strip query keys that start with ``utm_`` or are one of
+  ``gclid, fbclid, mc_cid, mc_eid, ref, refid, trackingid`` (case-insensitive
+  match, but KEPT keys keep their original case, e.g. ``jobId``); sort
+  remaining query pairs by key then value and re-encode.
+
+Candidate snapshot truthfulness:
+
+- ``metadata.candidate_profile`` contains ONLY values explicitly present in
+  ``config/profile.yml``. Absent/null/blank/whitespace-only values are
+  omitted; ``requires_sponsorship`` is emitted only when the source profile
+  explicitly stores a Python bool; no fields are invented (no website, no
+  work authorization, no years of experience, no forced ``False``).
 
 Determinism and idempotency:
 
@@ -80,6 +105,7 @@ logger = logging.getLogger("queue_exporter")
 # as exact strings so run_all and the unit tests match on them.
 EVALUATION_FAILED = "evaluation_failed"
 MISSING_URL = "missing_url"
+INVALID_URL = "invalid_url"
 INVALID_SCORE = "invalid_score"
 BELOW_THRESHOLD = "below_threshold"
 NOT_RECOMMENDED = "not_recommended"
@@ -93,6 +119,7 @@ SKIP_REASONS: frozenset[str] = frozenset(
     {
         EVALUATION_FAILED,
         MISSING_URL,
+        INVALID_URL,
         INVALID_SCORE,
         BELOW_THRESHOLD,
         NOT_RECOMMENDED,
@@ -117,45 +144,79 @@ def load_profile(profile_path: Path = Path("config/profile.yml")) -> dict[str, A
 
 
 def extract_candidate_profile_snapshot(profile: dict[str, Any]) -> dict[str, Any]:
-    """Extract a flat candidate profile snapshot for UAA.
+    """Extract a truthful candidate profile snapshot for UAA.
 
-    UAA's CandidateProfile model has fields: first_name, last_name,
-    full_name, email, phone, linkedin_url, city, country,
-    requires_sponsorship, work_authorization, years_of_experience,
-    current_position, website, github_url.
+    UAA's CandidateProfile model uses optional fields (all ``None`` by
+    default), so a sparse snapshot is contract-safe. This function emits
+    ONLY values explicitly present in ``config/profile.yml``:
 
-    We map from JobHunter's profile.yml structure.
+    - Absent, null, blank, or whitespace-only personal values are omitted.
+    - ``requires_sponsorship`` is emitted ONLY when the source candidate
+      dict explicitly contains a Python ``bool`` — never coerced from a
+      string, never defaulted to ``False``.
+    - Nothing is invented: no ``website``, ``work_authorization``, or
+      ``years_of_experience`` unless the source actually provides them
+      (JobHunter's profile.yml never does, so those keys stay absent).
+    - Real values (name, email, phone, LinkedIn, GitHub, city/country,
+      current position) are kept when actually present. ``first_name`` /
+      ``last_name`` and ``city`` / ``country`` are derived by splitting the
+      present ``full_name`` / ``location`` — faithful to the data, never a
+      default.
+
+    Returns:
+        A dict containing only truthful values for a partial snapshot. An
+        empty dict is valid and leaves UAA's fallback profile untouched.
     """
-    cand = profile.get("candidate", {})
-    full_name = cand.get("full_name", "")
-    # Split full_name into first/last (best effort).
-    parts = full_name.split(maxsplit=1)
-    first_name = parts[0] if parts else ""
-    last_name = parts[1] if len(parts) > 1 else ""
+    cand = profile.get("candidate") or {}
 
-    location = cand.get("location", "")
-    # Split "Erlangen, Germany" into city/country.
-    if "," in location:
-        city, country = (s.strip() for s in location.split(",", 1))
-    else:
-        city, country = location, ""
+    def non_blank(value) -> str | None:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
 
-    return {
-        "first_name": first_name,
-        "last_name": last_name,
-        "full_name": full_name,
-        "email": cand.get("email", ""),
-        "phone": cand.get("phone", ""),
-        "linkedin_url": cand.get("linkedin", ""),
-        "github_url": cand.get("github", ""),
-        "city": city,
-        "country": country,
-        "website": "",
-        "requires_sponsorship": False,
-        "work_authorization": "",
-        "years_of_experience": None,
-        "current_position": cand.get("subtitle", ""),
-    }
+    snapshot: dict[str, Any] = {}
+
+    full_name = non_blank(cand.get("full_name"))
+    if full_name:
+        snapshot["full_name"] = full_name
+        parts = full_name.split(maxsplit=1)
+        snapshot["first_name"] = parts[0]
+        if len(parts) > 1:
+            snapshot["last_name"] = parts[1]
+
+    email = non_blank(cand.get("email"))
+    if email:
+        snapshot["email"] = email
+    phone = non_blank(cand.get("phone"))
+    if phone:
+        snapshot["phone"] = phone
+    linkedin = non_blank(cand.get("linkedin"))
+    if linkedin:
+        snapshot["linkedin_url"] = linkedin
+    github = non_blank(cand.get("github"))
+    if github:
+        snapshot["github_url"] = github
+    subtitle = non_blank(cand.get("subtitle"))
+    if subtitle:
+        snapshot["current_position"] = subtitle
+
+    location = non_blank(cand.get("location"))
+    if location:
+        if "," in location:
+            city, country = (part.strip() for part in location.split(",", 1))
+        else:
+            city, country = location, ""
+        if city:
+            snapshot["city"] = city
+        if country:
+            snapshot["country"] = country
+
+    # requires_sponsorship: explicit Python bool only. A present truthy
+    # string would be an unknown source -> omitted (no coercion).
+    if "requires_sponsorship" in cand and isinstance(cand["requires_sponsorship"], bool):
+        snapshot["requires_sponsorship"] = cand["requires_sponsorship"]
+
+    return snapshot
 
 
 def load_evaluations(evaluations_path: Path = Path("data/evaluations.json")) -> list[dict[str, Any]]:
@@ -239,51 +300,101 @@ def _detect_platform(url: str) -> str:
     return "unknown"
 
 
-def _compute_application_id(platform: str, external_job_id: str | None, url: str) -> str:
-    """Compute the deterministic application_id.
+# Query keys to strip, case-insensitive (identical to UAA core/identity.py).
+_TRACKING_QUERY_KEYS: frozenset[str] = frozenset(
+    {"gclid", "fbclid", "mc_cid", "mc_eid", "ref", "refid", "trackingid"}
+)
+_DEFAULT_PORTS: dict[str, int] = {"http": 80, "https": 443}
 
-    This mirrors UAA's core/identity.py compute_application_id exactly:
-    - If platform and external_job_id both exist: identity_source = platform + ":" + external_job_id
-    - Otherwise: identity_source = canonical URL
-    - application_id = sha256(identity_source).hexdigest()
+
+def _is_tracking_key(key: str) -> bool:
+    """Return True if ``key`` is a tracking query parameter (case-insensitive)."""
+    lower = key.lower()
+    if lower.startswith("utm_"):
+        return True
+    return lower in _TRACKING_QUERY_KEYS
+
+
+def canonicalize_url(url: str) -> str:
+    """Return the canonical form of ``url``, mirroring UAA core/identity.py.
+
+    - Lowercases scheme and host (and nothing else — path and kept query
+      keys keep their original case, e.g. ``jobId``).
+    - Preserves URL userinfo exactly.
+    - Removes the fragment and default ports (80 for http, 443 for https).
+    - Removes a trailing slash except at the host root.
+    - Removes ``utm_*`` and tracking query keys case-insensitively without
+      altering any other key; remaining pairs are sorted by key then value.
+
+    Raises:
+        ValueError: If ``url`` is not an HTTP or HTTPS URL (UAA would reject
+            the row, so the exporter skips these with ``invalid_url``).
+    """
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    parts = urlsplit(url)
+
+    scheme = parts.scheme.lower()
+    if scheme not in ("http", "https"):
+        raise ValueError(f"URL must be HTTP or HTTPS, got scheme {scheme!r}")
+
+    host = parts.hostname or ""
+    host = host.lower()
+
+    # Remove default port.
+    port = parts.port
+    netloc = host
+    if port is not None and port != _DEFAULT_PORTS.get(scheme):
+        netloc = f"{host}:{port}"
+
+    # Preserve userinfo if present.
+    if parts.username:
+        userinfo: str = parts.username
+        if parts.password:
+            userinfo = f"{userinfo}:{parts.password}"
+        netloc = f"{userinfo}@{netloc}"
+
+    # Path: remove trailing slash except at host root.
+    path = parts.path
+    if len(path) > 1 and path.endswith("/"):
+        path = path.rstrip("/")
+
+    # Query: drop tracking keys (case-insensitive match, original case kept),
+    # then sort by (key, value) — identical to UAA.
+    if parts.query:
+        raw_pairs = parse_qsl(parts.query, keep_blank_values=True)
+        filtered = [(k, v) for k, v in raw_pairs if not _is_tracking_key(k)]
+        filtered.sort(key=lambda pair: (pair[0], pair[1]))
+        query = urlencode(filtered)
+    else:
+        query = ""
+
+    # Fragment is always dropped.
+    return urlunsplit((scheme, netloc, path, query, ""))
+
+
+def _compute_application_id(platform: str, external_job_id: str | None, url: str) -> str:
+    """Compute the deterministic application_id (mirror of UAA identity.py).
+
+    Identity source is ``platform + ":" + external_job_id.strip()`` when BOTH
+    are set and ``external_job_id`` remains non-empty after stripping
+    (whitespace-only falls back to the canonical URL). Otherwise the identity
+    source is the canonical URL.
+
+    Returns:
+        Lowercase SHA-256 hexdigest string.
+
+    Raises:
+        ValueError: If the URL scheme is not HTTP(S) (propagated from
+            :func:`canonicalize_url`, including when an external id is set —
+            UAA validates the URL regardless of the id).
     """
     import hashlib
-    from urllib.parse import urlsplit, parse_qsl, urlencode
 
-    if platform and external_job_id:
+    if platform and external_job_id and external_job_id.strip():
         identity_source = f"{platform}:{external_job_id.strip()}"
     else:
-        # Canonical URL (mirror UAA's logic).
-        parts = urlsplit(url)
-        scheme = parts.scheme.lower()
-        host = (parts.hostname or "").lower()
-        path = parts.path or ""
-        # Remove trailing slash except at host root.
-        if len(path) > 1 and path.endswith("/"):
-            path = path.rstrip("/")
-        # Remove default port.
-        port = parts.port
-        netloc = host
-        if port and not (
-            (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
-        ):
-            netloc = f"{host}:{port}"
-        # Filter query keys.
-        drop_prefixes = ("utm_",)
-        drop_keys = {"gclid", "fbclid", "mc_cid", "mc_eid", "ref", "refid", "trackingid"}
-        kept: list[tuple[str, str]] = []
-        for k, v in parse_qsl(parts.query, keep_blank_values=True):
-            kl = k.lower()
-            if any(kl.startswith(p) for p in drop_prefixes):
-                continue
-            if kl in drop_keys:
-                continue
-            kept.append((kl, v))
-        kept.sort(key=lambda kv: (kv[0], kv[1]))
-        query = urlencode(kept)
-        identity_source = f"{scheme}://{netloc}{path}"
-        if query:
-            identity_source += f"?{query}"
+        identity_source = canonicalize_url(url)
     return hashlib.sha256(identity_source.encode("utf-8")).hexdigest()
 
 
@@ -310,14 +421,15 @@ def build_queue_entries(
 
     1. ``success`` must be truthy                       -> ``evaluation_failed``
     2. a ``url`` must be present                        -> ``missing_url``
-    3. ``global_score`` must be numeric                 -> ``invalid_score``
-    4. ``global_score >= threshold``                    -> ``below_threshold``
-    5. recommendation must be empty or ``apply``        -> ``not_recommended``
-    6. the URL must be new                              -> ``duplicate_url``
-    7. company and title must be present                -> ``missing_required_fields``
-    8. ``cv_pdf`` and ``cover_letter_pdf`` values       -> ``missing_documents``
-    9. both PDFs must exist on disk                     -> ``document_not_found``
-    10. the computed ``application_id`` must be new     -> ``duplicate_application_id``
+    3. the URL must be HTTP(S) with a hostname          -> ``invalid_url``
+    4. ``global_score`` must be numeric                 -> ``invalid_score``
+    5. ``global_score >= threshold``                    -> ``below_threshold``
+    6. recommendation must be empty or ``apply``        -> ``not_recommended``
+    7. the URL must be new                              -> ``duplicate_url``
+    8. company and title must be present                -> ``missing_required_fields``
+    9. ``cv_pdf`` and ``cover_letter_pdf`` values       -> ``missing_documents``
+    10. both PDFs must exist on disk                    -> ``document_not_found``
+    11. the computed ``application_id`` must be new     -> ``duplicate_application_id``
 
     Evaluations are processed in a deterministic order (sorted by URL/title/
     company) and the returned rows are sorted by ``application_id``, so
@@ -379,7 +491,24 @@ def build_queue_entries(
             )
             continue
 
-        # 3. Score must be numeric.
+        # 3. URL must be HTTP(S) with a hostname — UAA rejects anything else
+        # (ApplicationJob._validate_url), so such a job must never be emitted.
+        from urllib.parse import urlsplit
+
+        url_parts = urlsplit(url)
+        if url_parts.scheme.lower() not in ("http", "https") or not url_parts.hostname:
+            skipped.append(
+                _skip_record(
+                    str(url),
+                    str(evaluation.get("company", "")),
+                    str(evaluation.get("title", "")),
+                    INVALID_URL,
+                    f"url must be HTTP(S) with a hostname, got {str(url)!r}",
+                )
+            )
+            continue
+
+        # 4. Score must be numeric.
         score = evaluation.get("global_score", 0)
         try:
             score_float = float(score)
@@ -395,7 +524,7 @@ def build_queue_entries(
             )
             continue
 
-        # 4. Above threshold.
+        # 5. Above threshold.
         if score_float < threshold:
             skipped.append(
                 _skip_record(
@@ -408,7 +537,7 @@ def build_queue_entries(
             )
             continue
 
-        # 5. Only jobs recommended for apply are eligible (skip_german,
+        # 6. Only jobs recommended for apply are eligible (skip_german,
         # skip, etc. are excluded under the current contract).
         recommendation = evaluation.get("recommendation", "")
         if recommendation and str(recommendation).strip().lower() != "apply":
@@ -423,7 +552,7 @@ def build_queue_entries(
             )
             continue
 
-        # 6. No duplicate URL in one export.
+        # 7. No duplicate URL in one export.
         if url in seen_urls:
             skipped.append(
                 _skip_record(
@@ -442,7 +571,7 @@ def build_queue_entries(
         company = evaluation.get("company") or pipeline_info.get("company") or ""
         title = evaluation.get("title") or pipeline_info.get("title") or ""
 
-        # 7. Required identity fields present (UAA requires non-empty
+        # 8. Required identity fields present (UAA requires non-empty
         # company/title). Never fabricate "Unknown".
         if not company or not title:
             missing = [name for name, value in (("company", company), ("title", title)) if not value]
@@ -460,7 +589,7 @@ def build_queue_entries(
         cv_pdf = evaluation.get("cv_pdf_path") or evaluation.get("cv_path")
         cover_pdf = evaluation.get("cover_letter_pdf_path") or evaluation.get("cover_letter_path")
 
-        # 8. Both documents must be referenced.
+        # 9. Both documents must be referenced.
         if not cv_pdf or not cover_pdf:
             missing = [name for name, value in (("cv_pdf", cv_pdf), ("cover_letter_pdf", cover_pdf)) if not value]
             skipped.append(
@@ -478,7 +607,7 @@ def build_queue_entries(
         cv_pdf_abs = str(Path(cv_pdf).resolve())
         cover_pdf_abs = str(Path(cover_pdf).resolve())
 
-        # 9. Documents must exist on disk.
+        # 10. Documents must exist on disk.
         if not Path(cv_pdf_abs).exists():
             skipped.append(
                 _skip_record(
@@ -507,9 +636,23 @@ def build_queue_entries(
         platform = _detect_platform(url)
 
         external_job_id = evaluation.get("external_job_id") or evaluation.get("job_id")
-        application_id = _compute_application_id(platform, external_job_id, url)
+        try:
+            application_id = _compute_application_id(platform, external_job_id, url)
+        except ValueError as exc:
+            # Defense in depth: any URL the identity logic refuses (e.g. a
+            # scheme that slipped through) must skip, never emit a bad row.
+            skipped.append(
+                _skip_record(
+                    str(url),
+                    company,
+                    title,
+                    INVALID_URL,
+                    f"cannot compute application_id: {exc}",
+                )
+            )
+            continue
 
-        # 10. No duplicate application_id in one export.
+        # 11. No duplicate application_id in one export.
         if application_id in seen_ids:
             skipped.append(
                 _skip_record(
@@ -726,5 +869,7 @@ __all__ = [
     "load_profile",
     "extract_candidate_profile_snapshot",
     "load_evaluations",
+    "canonicalize_url",
+    "INVALID_URL",
     "SKIP_REASONS",
 ]
