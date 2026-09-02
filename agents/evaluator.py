@@ -1,5 +1,5 @@
 """
-Evaluator agent — scores a job posting against the candidate's CV.
+Evaluator agent ΓÇö scores a job posting against the candidate's CV.
 
 Reads cv.md + profile.yml, sends to OpenRouter with a structured evaluation
 prompt, and outputs a scored report (1-5) with analysis.
@@ -41,11 +41,11 @@ Score each dimension 1-5, then provide a weighted global score.
 
 ### Classify german_level_required as one of: "none", "A1-A2", "B1", "B2+"
 - **"B2+"** = german_required=true, Language score=1. Triggers:
-  - "Fließende Deutschkenntnisse" / "Deutsch fließend" / "verhandlungssicher Deutsch"
+  - "Flie├ƒende Deutschkenntnisse" / "Deutsch flie├ƒend" / "verhandlungssicher Deutsch"
   - "Deutschkenntnisse mindestens B2/C1/C2"
   - "Deutsche Sprachkenntnisse erforderlich"
   - "sehr gute Deutschkenntnisse" / "gute Deutschkenntnisse"
-  - "Deutsch: verhandlungssicher" / "Deutsch: fließend"
+  - "Deutsch: verhandlungssicher" / "Deutsch: flie├ƒend"
   - ANY generic phrase implying fluency like "excellent German", "good German skills", "sichere Deutschkenntnisse"
   - If the JD says the working language IS German or requires German for customer/team communication
 - **"B1"** = german_required=true, Language score=2. Triggers:
@@ -55,7 +55,7 @@ Score each dimension 1-5, then provide a weighted global score.
   - "Deutschkenntnisse A1/A2"
 - **"none"** = german_required=false, Language score=4. Triggers:
   - No mention of German language requirements at all
-  - English explicitly mentioned as working language → Language score = 5
+  - English explicitly mentioned as working language ΓåÆ Language score = 5
 
 ## OTHER RULES
 - The candidate is open to ALL working student roles, including non-technical (office, admin, data entry)
@@ -121,13 +121,28 @@ class Evaluator:
         return self.cv_path.read_text(encoding="utf-8")
 
     def _load_profile(self) -> dict:
-        """Load profile config."""
-        if not self.profile_path.exists():
-            logger.warning("profile.yml not found, using defaults")
-            return {}
-        import yaml
-        with open(self.profile_path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
+        """Load profile config with local override support.
+
+        Loading order (later wins):
+        1. config/profile.yml  (tracked defaults/template)
+        2. config/profile.local.yml  (local overrides, gitignored)
+        """
+        profile = {}
+        # Load tracked defaults first
+        base_path = Path("config/profile.yml")
+        if base_path.exists():
+            import yaml
+            with open(base_path, "r", encoding="utf-8") as f:
+                profile = yaml.safe_load(f) or {}
+        # Apply local overrides on top (later wins)
+        local_path = Path("config/profile.local.yml")
+        if local_path.exists():
+            import yaml
+            with open(local_path, "r", encoding="utf-8") as f:
+                local = yaml.safe_load(f) or {}
+            if isinstance(local, dict):
+                profile.update(local)
+        return profile
 
     def _make_profile_summary(self) -> str:
         """Create a concise profile summary for the prompt."""
@@ -204,7 +219,7 @@ class Evaluator:
                 "title": title,
             }
 
-        # Add metadata — use AI-extracted names when original is empty
+        # Add metadata ΓÇö use AI-extracted names when original is empty
         ai_company = evaluation.get("company_name", "")
         ai_title = evaluation.get("job_title", "")
         evaluation["company"] = company if company else (ai_company or "Unknown")
@@ -265,14 +280,14 @@ class Evaluator:
         path = self.reports_dir / filename
 
         scores = evaluation.get("scores", {})
-        report = f"""# Evaluation: {evaluation['company']} — {evaluation['title']}
+        report = f"""# Evaluation: {evaluation['company']} ΓÇö {evaluation['title']}
 
 **Date:** {date}
 **Score:** {evaluation.get('global_score', 'N/A')}/5
 **URL:** {evaluation.get('url', 'N/A')}
 **Model:** {evaluation.get('model_used', 'N/A')}
 **Recommendation:** {evaluation.get('recommendation', 'N/A')}
-**German Required:** {'Yes ⚠️' if evaluation.get('german_required') else 'No ✅'}
+**German Required:** {'Yes ΓÜá∩╕Å' if evaluation.get('german_required') else 'No Γ£à'}
 
 ---
 

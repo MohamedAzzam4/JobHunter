@@ -1,21 +1,21 @@
 candidate:
   full_name: "Template User"
   short_name: "Template User"
-  subtitle: "AI Engineer | AI Agent Builder | Working-Student Candidate"
+  subtitle: "AI Engineer | AI Agent Builder | Candidate"
   email: "template@example.com"
   phone: "+1 555 555 5555"
   location: "TemplateCity, Country"
   university: "University of Template"
   degree_current: "M.Sc. Template Technologies"
   degree_bachelor: "B.Sc. Engineering (Honors)"
-  linkedin: "https://www.linkedin.com/in/template-user/"
+  linkedin: "https://www.linkedin.com/in/template-user"
   github: "https://github.com/template-user"
 
 target_roles:
   primary:
     - "Working Student"
     - "Werkstudent"
-  scope: "all"  # technical AND non-technical
+  scope: "all" # technical AND non-technical
 
 skills:
   technical:
@@ -42,32 +42,28 @@ preferences:
   german_required: false
   hours_per_week: 20
   locations:
-    - "Erlangen"
+    - "TemplateCity"
     - "TemplateCity2"
-    - "TemplateCity6"
     - "TemplateCity3"
-    - "TemplateCity7"
 
 evaluation:
   auto_cv_threshold: 3.5
   # German filter policy: reject_b1_plus (default), reject_b2_plus_only, reject_unless_bilingual, accept_all
-  # reject_b1_plus          = reject B1 and B2+ (strictest — only A1-A2 or none pass)
+  # reject_b1_plus          = reject B1 and B2+ (strictest only A1-A2 or none pass)
   # reject_b2_plus_only     = reject only B2+ (B1 jobs pass through)
   # reject_unless_bilingual  = reject German jobs UNLESS the JD also requires English
   # accept_all              = don't auto-reject any German level
-  german_filter: reject_b1_plus
+  german_filter: accept_all
   # OpenRouter model chain (tried in order; first success wins)
   # See https://openrouter.ai/models for available free models
   openrouter_models:
-    - "google/gemma-4-26b-a4b-it:free"         # Primary — verified free 2026-09-02
-    - "google/gemma-4-31b-it:free"            # Fallback 1 — free, rate-limited
-    - "liquid/lfm-2.5-2.6b:free"               # Fallback 2 — Liquid, free
-    - "z-ai/glm-5.2:free"                      # Fallback 3 — GLM, free
-    - "nvidia/nemotron-3.5-lightning:free"     # Fallback 4 — Nemotron, free
-    - "openai/gpt-oss-120b:free"              # Legacy — may 404, keep last
+    - "google/gemma-4-26b-a4b-it:free"         # Primary
+    - "google/gemma-4-31b-it:free"            # Fallback 1
+    - "nvidia/nemotron-3.5-lightning:free"     # Fallback 2
+    - "meta-llama/llama-3.3-70b-instruct:free" # Fallback 3
   # Google AI Studio models (for evaluation, separate from OpenRouter)
   google_models:
-    - "gemma-4-26b-a4b-it"                   # Primary — more reliable
+    - "gemma-4-26b-a4b-it"                   # Primary
     - "gemma-4-31b-it"                       # Backup
 
 queue_export:
