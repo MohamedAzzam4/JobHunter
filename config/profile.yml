@@ -59,11 +59,11 @@ evaluation:
   # OpenRouter model chain (tried in order; first success wins)
   # See https://openrouter.ai/models for available free models
   openrouter_models:
-    - "google/gemma-3-4b-it:free"             # Primary — verified 2026-09-02, free, fast
-    - "google/gemma-3-12b-it:free"            # Fallback 1 — 12b variant
-    - "qwen/qwen-2.5-7b-instruct:free"         # Fallback 2 — Qwen
-    - "meta-llama/llama-3.2-3b-instruct:free"  # Fallback 3 — Llama
-    - "google/gemma-4-31b-it:free"            # Fallback 4 — 31b, rate-limited
+    - "google/gemma-4-26b-a4b-it:free"         # Primary — verified free 2026-09-02
+    - "google/gemma-4-31b-it:free"            # Fallback 1 — free, rate-limited
+    - "liquid/lfm-2.5-2.6b:free"               # Fallback 2 — Liquid, free
+    - "z-ai/glm-5.2:free"                      # Fallback 3 — GLM, free
+    - "nvidia/nemotron-3.5-lightning:free"     # Fallback 4 — Nemotron, free
     - "openai/gpt-oss-120b:free"              # Legacy — may 404, keep last
   # Google AI Studio models (for evaluation, separate from OpenRouter)
   google_models:
