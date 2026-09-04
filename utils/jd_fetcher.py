@@ -95,6 +95,80 @@ def _check_expired(text: str, url: str) -> bool:
     return False
 
 
+def _extract_jsonld_jd(html: str) -> tuple[str, str]:
+    """Extract a JobPosting description from JSON-LD structured data.
+
+    Many ATS/career pages (e.g. Workday) render job content client-side but
+    embed a standards-compliant ``application/ld+json`` JobPosting block for
+    SEO. Returns (title, text); empty strings when no usable block exists.
+    Pure function — hermetically testable.
+    """
+    import json as _json
+
+    blocks = re.findall(
+        r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>',
+        html,
+        re.DOTALL | re.IGNORECASE,
+    )
+    candidates: list[dict] = []
+    for block in blocks:
+        try:
+            data = _json.loads(block.strip())
+        except (ValueError, TypeError):
+            continue
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            # Unwrap @graph containers.
+            if "@graph" in item and isinstance(item["@graph"], list):
+                candidates.extend(
+                    node for node in item["@graph"] if isinstance(node, dict)
+                )
+            else:
+                candidates.append(item)
+
+    for node in candidates:
+        node_type = node.get("@type", "")
+        types = node_type if isinstance(node_type, list) else [node_type]
+        if not any(str(t).lower() == "jobposting" for t in types):
+            continue
+        description = node.get("description", "")
+        if not isinstance(description, str) or len(description.strip()) < 300:
+            continue
+        title = node.get("title", "")
+        if not isinstance(title, str):
+            title = ""
+        return title.strip(), _clean_html_to_text(description)
+
+    return "", ""
+
+
+def _smartrecruiters_api_detail(url: str) -> tuple[str | None, str | None]:
+    """Split a jobs.smartrecruiters.com apply URL into (company, posting_id).
+
+    Returns (None, None) when the URL is not a SmartRecruiters apply URL.
+    The posting id may carry an SEO slug suffix (``{id}-{slug}``); only the
+    leading numeric id is returned.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None, None
+    host = (parts.hostname or "").lower()
+    if host != "jobs.smartrecruiters.com":
+        return None, None
+    segments = [seg for seg in parts.path.split("/") if seg]
+    if len(segments) < 2:
+        return None, None
+    posting_id = segments[1].split("-")[0]
+    if not posting_id:
+        return None, None
+    return segments[0], posting_id
+
+
 def _extract_title_from_html(html: str) -> str:
     """Try to extract job title from HTML."""
     # Try <title> tag
@@ -109,11 +183,83 @@ def _extract_title_from_html(html: str) -> str:
     return ""
 
 
+async def _fetch_smartrecruiters_detail(url: str) -> FetchResult | None:
+    """Fetch a JD via the SmartRecruiters public postings API.
+
+    Applies only to ``jobs.smartrecruiters.com`` apply URLs. Returns a
+    populated FetchResult on success, or None to fall through to the
+    generic HTML path (never raises).
+    """
+    result = FetchResult(url=url, success=False)
+    company, posting_id = _smartrecruiters_api_detail(url)
+    if not company or not posting_id:
+        return None
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=FETCH_TIMEOUT,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+        ) as client:
+            resp = await client.get(
+                f"https://api.smartrecruiters.com/v1/companies/"
+                f"{company}/postings/{posting_id}"
+            )
+    except Exception as e:  # noqa: BLE001 — fall through to HTML path
+        logger.info(f"SmartRecruiters API unavailable, falling back: {e}")
+        return None
+
+    if resp.status_code == 404:
+        result.is_expired = True
+        result.error = "404 Not Found"
+        return result
+    if resp.status_code != 200:
+        return None
+
+    try:
+        data = resp.json()
+    except ValueError:
+        return None
+    sections = (data.get("jobAd", {}) or {}).get("sections", {}) or {}
+    parts = []
+    for key in (
+        "jobDescription",
+        "qualifications",
+        "companyDescription",
+        "additionalInformation",
+    ):
+        section = sections.get(key, {}) or {}
+        text = section.get("text", "") or ""
+        if not isinstance(text, str) or not text.strip():
+            continue
+        title = section.get("title", "") or key
+        parts.append(f"## {title}\n{text.replace('&#xa0;', ' ')}")
+    if not parts:
+        return None
+
+    text = _clean_html_to_text("\n\n".join(parts))
+    if _check_expired(text, url):
+        result.is_expired = True
+        result.error = "Job posting appears expired"
+        return result
+    if len(text) > MAX_JD_LENGTH:
+        text = text[:MAX_JD_LENGTH]
+        result.truncated = True
+    result.success = True
+    result.title = str(data.get("name", "") or "")
+    result.text = text
+    result.method = "smartrecruiters-api"
+    return result
+
+
 async def fetch_jd(url: str) -> FetchResult:
     """Fetch a job description from a URL.
-    
-    First tries httpx (fast, no browser needed).
-    Falls back to Playwright if content looks like an SPA.
+
+    Tries, in order: the SmartRecruiters public API (for its apply URLs),
+    plain httpx HTML, embedded JSON-LD JobPosting data (for JS-rendered
+    ATS pages), then falls back to Playwright if content looks like an SPA.
     
     Args:
         url: The job posting URL
@@ -122,6 +268,15 @@ async def fetch_jd(url: str) -> FetchResult:
         FetchResult with success status, text, and metadata
     """
     result = FetchResult(url=url, success=False)
+
+    # 0. SmartRecruiters apply URLs: use the public postings API directly
+    # (full description without a browser).
+    try:
+        sr_result = await _fetch_smartrecruiters_detail(url)
+        if sr_result is not None:
+            return sr_result
+    except Exception as e:  # noqa: BLE001 — fall through to HTML path
+        logger.info(f"SmartRecruiters fast path failed, falling back: {e}")
 
     # 1. Try httpx (static HTML)
     try:
@@ -176,6 +331,22 @@ async def fetch_jd(url: str) -> FetchResult:
                     text = _clean_html_to_text(html)
             else:
                 text = _clean_html_to_text(html)
+
+            # JSON-LD JobPosting fallback: JS-rendered ATS/career pages
+            # (e.g. Workday) ship an SEO structured-data block with the
+            # full description even when the visible HTML is a thin shell.
+            if len(text.strip()) < 300:
+                ld_title, ld_text = _extract_jsonld_jd(html)
+                if len(ld_text.strip()) >= 300:
+                    logger.info("JSON-LD JD extracted (%d chars)", len(ld_text))
+                    if _check_expired(ld_text, str(resp.url)):
+                        result.is_expired = True
+                        result.title = ld_title or title
+                        result.error = "Job posting appears expired"
+                        return result
+                    text = ld_text
+                    if ld_title:
+                        title = ld_title
 
             # Check if expired
             if _check_expired(text, str(resp.url)):

@@ -413,14 +413,13 @@ def _flush_pending(html_parts: list, pending_title: str | None,
 
 
 def _load_candidate_info() -> dict:
-    """Load candidate info from profile.yml."""
+    """Load candidate info from profile.yml with gitignored local PII override."""
     try:
-        import yaml
-        profile_path = Path("config/profile.yml")
-        if profile_path.exists():
-            with open(profile_path, "r", encoding="utf-8") as f:
-                profile = yaml.safe_load(f) or {}
-            return profile.get("candidate", {})
+        from utils.profile_loader import load_profile_with_local
+
+        profile = load_profile_with_local()
+        candidate = profile.get("candidate", {})
+        return candidate if isinstance(candidate, dict) else {}
     except Exception:
         pass
     return {}

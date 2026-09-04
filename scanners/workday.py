@@ -17,20 +17,45 @@ from dataclasses import dataclass
 
 import httpx
 
-from .base import BaseScanner, JobPosting, ScanResult
+from .base import (
+    BaseScanner,
+    JobPosting,
+    ScanResult,
+    classify_exception,
+    classify_http_status,
+)
 
 logger = logging.getLogger(__name__)
 
 # Known API endpoints — discovered by inspecting network traffic
 # Only include companies with VERIFIED, working endpoints
 # Note: Adidas/Puma use Eightfold.ai (no direct API support) — covered by JobSpy
+#
+# SmartRecruiters public API contract (verified 2026-09-04 with live probe):
+#   GET https://api.smartrecruiters.com/v1/companies/{IDENTIFIER}/postings
+# where IDENTIFIER is the company's SmartRecruiters identifier (e.g.
+# "BoschGroup" — NOT the display name "Bosch"). A wrong identifier yields
+# HTTP 404, which is a REQUEST_CONTRACT_FAILURE, never "zero jobs".
+# Human apply URLs follow https://jobs.smartrecruiters.com/{ID}/{postingId}
+# (verified HTTP 200); the API `ref` field points at api.* JSON and must
+# not be used as the application URL.
 KNOWN_ENDPOINTS = {
     "bosch": {
         "api_url": "https://careers.smartrecruiters.com/BoschGroup",
         "base_url": "https://www.bosch.com/careers/",
         "provider": "smartrecruiters",
     },
+    # DATEV runs Workday (verified 2026-09-04 with live probe: HTTP 200,
+    # 19 "Werkstudent" postings). Tenant "datev", board "Datev_Careers".
+    "datev": {
+        "api_url": "https://datev.wd3.myworkdayjobs.com/wday/cxs/datev/Datev_Careers/jobs",
+        "base_url": "https://datev.wd3.myworkdayjobs.com/de-DE/Datev_Careers",
+        "provider": "workday",
+    },
 }
+
+SMARTRECRUITERS_API = "https://api.smartrecruiters.com/v1/companies"
+SMARTRECRUITERS_APPLY = "https://jobs.smartrecruiters.com"
 
 FETCH_TIMEOUT = 20
 MAX_PAGES = 5
@@ -44,6 +69,14 @@ class APIEndpoint:
     api_url: str
     base_url: str
     provider: str  # "workday", "smartrecruiters", "eightfold"
+    company_identifier: str = ""  # ATS tenant/site id (e.g. "BoschGroup")
+
+    def __post_init__(self) -> None:
+        if not self.company_identifier:
+            # Derive the ATS identifier from the api_url path tail, e.g.
+            # "https://careers.smartrecruiters.com/BoschGroup" -> "BoschGroup".
+            tail = self.api_url.rstrip("/").rsplit("/", 1)[-1]
+            self.company_identifier = tail or self.company_name
 
 
 class DirectAPIScanner(BaseScanner):
@@ -94,26 +127,33 @@ class DirectAPIScanner(BaseScanner):
 
         for endpoint in self.companies:
             try:
-                jobs = await self._scan_company(endpoint)
+                jobs = await self._scan_company(endpoint, result)
                 result.jobs.extend(jobs)
             except Exception as e:
-                error_msg = f"{endpoint.company_name}: {e}"
-                result.errors.append(error_msg)
-                self.logger.error(f"Error scanning {error_msg}")
+                category = classify_exception(e)
+                result.note_error(f"{endpoint.company_name}: {e}", category)
+                self.logger.error(f"Error scanning {endpoint.company_name}: {e}")
 
         return self._finish_result(result)
 
-    async def _scan_company(self, endpoint: APIEndpoint) -> list[JobPosting]:
-        """Scan a single company via its API."""
+    async def _scan_company(
+        self, endpoint: APIEndpoint, result: ScanResult
+    ) -> list[JobPosting]:
+        """Scan a single company via its API.
+
+        HTTP contract failures (404/422/…) and transport errors are recorded
+        on ``result`` with a failure category — they are never silent and
+        never reported as "zero jobs".
+        """
         search_terms = self._get_search_terms(endpoint.company_name)
         all_jobs = []
 
         for search_term in search_terms:
             try:
                 if endpoint.provider == "workday":
-                    jobs = await self._scan_workday(endpoint, search_term)
+                    jobs = await self._scan_workday(endpoint, search_term, result)
                 elif endpoint.provider == "smartrecruiters":
-                    jobs = await self._scan_smartrecruiters(endpoint, search_term)
+                    jobs = await self._scan_smartrecruiters(endpoint, search_term, result)
                 else:
                     # For unsupported providers, skip gracefully
                     self.logger.info(
@@ -123,15 +163,28 @@ class DirectAPIScanner(BaseScanner):
                     continue
 
                 all_jobs.extend(jobs)
-            except httpx.TimeoutException:
+            except httpx.TimeoutException as e:
+                result.note_error(
+                    f"{endpoint.company_name}: timeout on '{search_term}'",
+                    classify_exception(e),
+                )
                 self.logger.warning(
                     f"{endpoint.company_name}: timeout on '{search_term}'"
                 )
-            except httpx.ConnectError:
+            except httpx.ConnectError as e:
+                result.note_error(
+                    f"{endpoint.company_name}: connection failed on "
+                    f"'{search_term}' (site may be geo-blocked)",
+                    classify_exception(e),
+                )
                 self.logger.warning(
                     f"{endpoint.company_name}: connection failed (site may be geo-blocked)"
                 )
             except Exception as e:
+                result.note_error(
+                    f"{endpoint.company_name}: error on '{search_term}': {e}",
+                    classify_exception(e),
+                )
                 self.logger.warning(
                     f"{endpoint.company_name}: error on '{search_term}': {e}"
                 )
@@ -141,7 +194,9 @@ class DirectAPIScanner(BaseScanner):
         self.logger.info(f"{endpoint.company_name}: found {len(all_jobs)} jobs via API")
         return all_jobs
 
-    async def _scan_workday(self, endpoint: APIEndpoint, search_text: str) -> list[JobPosting]:
+    async def _scan_workday(
+        self, endpoint: APIEndpoint, search_text: str, result: ScanResult
+    ) -> list[JobPosting]:
         """Scan a Workday career portal."""
         all_jobs = []
         offset = 0
@@ -166,6 +221,12 @@ class DirectAPIScanner(BaseScanner):
                 )
 
                 if resp.status_code != 200:
+                    category = classify_http_status(resp.status_code)
+                    result.note_error(
+                        f"{endpoint.company_name} (Workday): HTTP "
+                        f"{resp.status_code} (offset={offset})",
+                        category,
+                    )
                     self.logger.warning(
                         f"{endpoint.company_name}: HTTP {resp.status_code} "
                         f"(offset={offset})"
@@ -181,11 +242,14 @@ class DirectAPIScanner(BaseScanner):
                     external_path = p.get("externalPath", "")
                     url = f"{endpoint.base_url}{external_path}" if external_path else ""
 
-                    location = ""
-                    for bf in p.get("bulletFields", []):
-                        if bf and not bf.startswith("Posted"):
-                            location = bf
-                            break
+                    # Prefer the dedicated locationsText field (e.g. DATEV);
+                    # fall back to the first non-"Posted" bullet field.
+                    location = str(p.get("locationsText", "") or "")
+                    if not location:
+                        for bf in p.get("bulletFields", []):
+                            if bf and not bf.startswith("Posted"):
+                                location = bf
+                                break
 
                     all_jobs.append(JobPosting(
                         title=title,
@@ -203,13 +267,21 @@ class DirectAPIScanner(BaseScanner):
 
         return all_jobs
 
-    async def _scan_smartrecruiters(self, endpoint: APIEndpoint, search_text: str) -> list[JobPosting]:
-        """Scan SmartRecruiters API."""
+    async def _scan_smartrecruiters(
+        self, endpoint: APIEndpoint, search_text: str, result: ScanResult
+    ) -> list[JobPosting]:
+        """Scan the SmartRecruiters public postings API.
+
+        Uses the company's SmartRecruiters identifier (e.g. "BoschGroup"),
+        never the display name. Job URLs are human apply URLs
+        (``jobs.smartrecruiters.com``), never ``api.*`` JSON endpoints.
+        """
         jobs = []
+        identifier = endpoint.company_identifier or endpoint.company_name
 
         async with httpx.AsyncClient(timeout=FETCH_TIMEOUT) as client:
             resp = await client.get(
-                f"https://api.smartrecruiters.com/v1/companies/{endpoint.company_name}/postings",
+                f"{SMARTRECRUITERS_API}/{identifier}/postings",
                 params={"q": search_text, "limit": 50},
                 headers={
                     "Accept": "application/json",
@@ -218,6 +290,12 @@ class DirectAPIScanner(BaseScanner):
             )
 
             if resp.status_code != 200:
+                category = classify_http_status(resp.status_code)
+                result.note_error(
+                    f"{endpoint.company_name} (SmartRecruiters): HTTP "
+                    f"{resp.status_code}",
+                    category,
+                )
                 self.logger.warning(
                     f"{endpoint.company_name} (SmartRecruiters): HTTP {resp.status_code}"
                 )
@@ -232,9 +310,22 @@ class DirectAPIScanner(BaseScanner):
                 if loc.get("country"):
                     loc_parts.append(loc["country"])
 
+                # Prefer the human apply URL. The API `ref` field points at
+                # an api.* JSON endpoint and must not be used as the
+                # application URL.
+                posting_id = str(item.get("id", "") or "")
+                item_company = item.get("company", {}) or {}
+                item_identifier = (
+                    str(item_company.get("identifier", "") or "") or identifier
+                )
+                if posting_id:
+                    url = f"{SMARTRECRUITERS_APPLY}/{item_identifier}/{posting_id}"
+                else:
+                    url = str(item.get("ref", "") or "")
+
                 jobs.append(JobPosting(
                     title=item.get("name", ""),
-                    url=item.get("ref", ""),
+                    url=url,
                     company=endpoint.company_name,
                     location=", ".join(loc_parts),
                     date_posted=item.get("releasedDate", "")[:10] if item.get("releasedDate") else "",

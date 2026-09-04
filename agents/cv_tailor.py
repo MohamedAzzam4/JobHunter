@@ -15,8 +15,6 @@ import logging
 import re
 from pathlib import Path
 
-import yaml
-
 from .smart_router import SmartRouter
 
 logger = logging.getLogger(__name__)
@@ -61,12 +59,10 @@ from utils.json_extract import extract_json_object as _extract_json_object
 
 
 def _load_profile() -> dict:
-    """Load profile.yml."""
-    path = Path("config/profile.yml")
-    if not path.exists():
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    """Load profile.yml with gitignored local PII override."""
+    from utils.profile_loader import load_profile_with_local
+
+    return load_profile_with_local()
 
 
 def _split_cv_sections(cv_text: str) -> tuple[str, dict[str, str]]:

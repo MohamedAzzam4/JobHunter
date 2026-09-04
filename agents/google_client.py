@@ -99,17 +99,18 @@ class GoogleAIClient:
 
     @staticmethod
     def _load_google_models() -> list[str]:
-        """Load Google model chain from profile.yml."""
+        """Load Google model chain from tracked profile.yml.
+
+        The gitignored local profile never changes model chains
+        (see utils/profile_loader).
+        """
         try:
-            import yaml
-            from pathlib import Path
-            profile_path = Path("config/profile.yml")
-            if profile_path.exists():
-                with open(profile_path, "r", encoding="utf-8") as f:
-                    profile = yaml.safe_load(f) or {}
-                models = profile.get("evaluation", {}).get("google_models", [])
-                if models:
-                    return models
+            from utils.profile_loader import load_profile_with_local
+
+            profile = load_profile_with_local()
+            models = profile.get("evaluation", {}).get("google_models", [])
+            if models:
+                return models
         except Exception:
             pass
         return ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]

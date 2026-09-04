@@ -7,20 +7,38 @@ Handles rate limits and errors per-site gracefully.
 
 import asyncio
 import logging
+import sys
 from concurrent.futures import ThreadPoolExecutor
 
-# numpy must be imported BEFORE jobspy to suppress floating-point
-# exception traps that cause "longdouble infinity to integer" crashes
-# on Python 3.14 + numpy 2.4 (https://github.com/numpy/numpy/issues/...)
-try:
-    import numpy as np
-    np.seterr(all="ignore")
-except ImportError:
-    pass
-
-from .base import BaseScanner, JobPosting, ScanResult
+from .base import (
+    BaseScanner,
+    JobPosting,
+    ScanResult,
+    ScanStatus,
+    classify_exception,
+)
 
 logger = logging.getLogger(__name__)
+
+# Supported runtimes for the JobSpy/pandas/numpy stack. The repo Dockerfile
+# pins python:3.12-slim; Python 3.13 is verified working locally. NumPy
+# crashes at import time on Python 3.14 ("longdouble infinity to integer"),
+# so the scanner must degrade to DEPENDENCY_FAILURE instead of killing the
+# whole pipeline (see run_scan.py lazy import + this module's guards).
+SUPPORTED_PYTHON_MAJOR_MINOR = ((3, 12), (3, 13))
+
+
+def _check_runtime() -> str | None:
+    """Return a DEPENDENCY_FAILURE reason when unsupported, else None."""
+    current = sys.version_info[:2]
+    if current not in SUPPORTED_PYTHON_MAJOR_MINOR and current >= (3, 14):
+        return (
+            f"python {current[0]}.{current[1]} is not supported for the "
+            f"JobSpy/numpy stack (supported: "
+            + ", ".join(f"{a}.{b}" for a, b in SUPPORTED_PYTHON_MAJOR_MINOR)
+            + "); use the documented supported runtime"
+        )
+    return None
 
 
 class JobSpyScanner(BaseScanner):
@@ -83,6 +101,17 @@ class JobSpyScanner(BaseScanner):
         """Execute all configured JobSpy searches."""
         result = self._make_result()
 
+        # Fail fast with a clear category on unsupported runtimes instead of
+        # crashing deep inside numpy/jobspy imports.
+        runtime_reason = _check_runtime()
+        if runtime_reason is not None:
+            result.note_error(
+                f"JobSpy skipped: {runtime_reason}",
+                ScanStatus.DEPENDENCY_FAILURE.value,
+            )
+            self.logger.error(f"JobSpy skipped: {runtime_reason}")
+            return self._finish_result(result)
+
         if not self.searches:
             self.logger.warning("No jobspy_searches configured in portals.yml")
             return self._finish_result(result)
@@ -101,7 +130,7 @@ class JobSpyScanner(BaseScanner):
                         f"JobSpy search '{search_config.get('term', '?')}' "
                         f"in '{search_config.get('location', '?')}': {e}"
                     )
-                    result.errors.append(error_msg)
+                    result.note_error(error_msg, classify_exception(e))
                     self.logger.error(error_msg)
 
                 # Delay between searches to avoid rate limits
@@ -110,18 +139,12 @@ class JobSpyScanner(BaseScanner):
         return self._finish_result(result)
 
     def _run_search(self, search_config: dict) -> list[JobPosting]:
-        """Run a single JobSpy search (synchronous, runs in thread)."""
-        term = search_config.get("term", "Working Student")
-        location = search_config.get("location", "Erlangen, Germany")
+        """Run a single JobSpy search (synchronous, runs in thread).
 
-        try:
-            return self._do_search(search_config)
-        except BaseException as e:
-            self.logger.warning(
-                f"JobSpy search '{term}' in '{location}' failed: "
-                f"{type(e).__name__}: {e}"
-            )
-            return []
+        Failures propagate to :meth:`scan`, which records them with a
+        failure category — a failed search is never reported as zero jobs.
+        """
+        return self._do_search(search_config)
 
     def _do_search(self, search_config: dict) -> list[JobPosting]:
         """Inner search logic — separated so errors are always caught."""

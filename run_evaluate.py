@@ -19,7 +19,6 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
 from dotenv import load_dotenv
 
 from agents.evaluator import Evaluator
@@ -48,12 +47,10 @@ logging.getLogger().addHandler(file_handler)
 
 
 def load_profile() -> dict:
-    """Load profile.yml for threshold config."""
-    path = Path("config/profile.yml")
-    if not path.exists():
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    """Load profile.yml for threshold config (local file never changes it)."""
+    from utils.profile_loader import load_profile_with_local
+
+    return load_profile_with_local()
 
 
 def get_pending_jobs(pipeline_path: str = "data/pipeline.md") -> list[dict]:

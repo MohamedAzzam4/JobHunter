@@ -121,28 +121,16 @@ class Evaluator:
         return self.cv_path.read_text(encoding="utf-8")
 
     def _load_profile(self) -> dict:
-        """Load profile config with local override support.
+        """Load profile config with gitignored local PII override.
 
-        Loading order (later wins):
-        1. config/profile.yml  (tracked defaults/template)
-        2. config/profile.local.yml  (local overrides, gitignored)
+        Delegates to :func:`utils.profile_loader.load_profile_with_local`:
+        personal-data sections come from ``config/profile.local.yml`` when
+        present, everything else from the tracked base. Custom
+        ``profile_path`` values load exactly the given file (hermetic).
         """
-        profile = {}
-        # Load tracked defaults first
-        base_path = Path("config/profile.yml")
-        if base_path.exists():
-            import yaml
-            with open(base_path, "r", encoding="utf-8") as f:
-                profile = yaml.safe_load(f) or {}
-        # Apply local overrides on top (later wins)
-        local_path = Path("config/profile.local.yml")
-        if local_path.exists():
-            import yaml
-            with open(local_path, "r", encoding="utf-8") as f:
-                local = yaml.safe_load(f) or {}
-            if isinstance(local, dict):
-                profile.update(local)
-        return profile
+        from utils.profile_loader import load_profile_with_local
+
+        return load_profile_with_local(self.profile_path)
 
     def _make_profile_summary(self) -> str:
         """Create a concise profile summary for the prompt."""

@@ -55,10 +55,26 @@ source jobhunter_venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> **⚠️ Python 3.13+ users:** `python-jobspy` internally pins `numpy==1.26.3`, which crashes on Python 3.13+. Our `requirements.txt` overrides this with `numpy>=2.4`, but if you still see `OverflowError: cannot convert longdouble infinity to integer`, run:
+> **⚠️ Supported Python runtimes:** the JobSpy/pandas/numpy stack works on
+> Python 3.12 (see `Dockerfile`) and 3.13. It is **not supported on
+> Python 3.14**, where NumPy crashes at import time
+> (`OverflowError: cannot convert longdouble infinity to integer`). On
+> unsupported runtimes the JobSpy scanner degrades to a recorded
+> `DEPENDENCY_FAILURE` instead of killing the pipeline — run the supported
+> runtime for real discovery.
+>
+> **Recommended local setup (Python 3.13):**
 > ```bash
-> pip install "numpy>=2.4" --force-reinstall --no-deps
+> py -3.13 -m venv .venv313
+> .venv313\Scripts\activate
+> pip install "numpy>=2.4"
+> pip install --no-deps "python-jobspy==1.1.82"
+> pip install pandas httpx pyyaml python-dotenv google-genai weasyprint openpyxl pytest rich pytest-timeout beautifulsoup4 markdownify tls-client regex requests pydantic
 > ```
+> (`python-jobspy` internally pins `numpy==1.26.3`, which has no wheel for
+> Python 3.13 and crashes on 3.13+ — installing it with `--no-deps` after a
+> binary `numpy>=2.4` is the verified working combination. If you still see
+> the `longdouble` OverflowError, run `pip install "numpy>=2.4" --force-reinstall --no-deps`.)
 
 **WeasyPrint (PDF generation) on Windows:**
 ```bash

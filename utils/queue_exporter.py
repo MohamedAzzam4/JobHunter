@@ -111,8 +111,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 logger = logging.getLogger("queue_exporter")
 
 # Structure skip reasons used when a job is excluded from the export. Kept
@@ -147,14 +145,15 @@ SKIP_REASONS: frozenset[str] = frozenset(
 
 
 def load_profile(profile_path: Path = Path("config/profile.yml")) -> dict[str, Any]:
-    """Load the candidate profile YAML.
+    """Load the candidate profile YAML with gitignored local PII override.
 
-    Returns an empty dict if the file does not exist.
+    The override applies only to the default tracked profile; explicit
+    custom paths (hermetic tests, ``--profile``) load exactly the given
+    file. Returns an empty dict if the file does not exist.
     """
-    if not profile_path.exists():
-        return {}
-    with profile_path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    from utils.profile_loader import load_profile_with_local
+
+    return load_profile_with_local(profile_path)
 
 
 def extract_candidate_profile_snapshot(profile: dict[str, Any]) -> dict[str, Any]:
@@ -681,6 +680,17 @@ def build_queue_entries(
         source = pipeline_info.get("source", _detect_source(url))
         platform = _detect_platform(url)
 
+        # Application-target quality (additive metadata; never changes
+        # eligibility — see utils.target_quality.is_pilot_eligible for the
+        # pilot-selection rule). Prefer a scanner-attached quality when the
+        # pipeline record carries one.
+        from utils.target_quality import classify_target_quality
+
+        target_quality = (
+            pipeline_info.get("target_quality")
+            or classify_target_quality(url, source)
+        )
+
         # External-ID normalization at the JobHunter/UAA boundary. The raw
         # value may be an integer (e.g. 512492 or 0), a string, or an
         # unsupported type; _normalize_external_job_id turns it into a
@@ -767,6 +777,7 @@ def build_queue_entries(
             "metadata": {
                 "candidate_profile": profile_snapshot,
                 "score_breakdown": evaluation.get("scores"),
+                "target_quality": target_quality,
             },
         }
         rows.append(row)

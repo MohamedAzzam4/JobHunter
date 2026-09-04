@@ -18,8 +18,8 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
+from scanners.base import ScanResult, ScanStatus, classify_exception
 from scanners.workday import DirectAPIScanner
-from scanners.jobspy_scanner import JobSpyScanner
 from scanners.bridge import PipelineBridge
 from utils.utf8_logging import get_utf8_stream_handler
 
@@ -63,25 +63,54 @@ async def run_scan(dry_run: bool = False):
 
     scan_results = []
 
-    # 1. Workday scanner (Siemens, Adidas, Puma, Bosch)
+    # 1. Direct-API scanner (Workday/SmartRecruiters, e.g. Bosch)
     try:
         workday = DirectAPIScanner(config)
         result = await workday.scan()
         scan_results.append(result)
-        logger.info(f"Workday: {result.job_count} jobs, {result.error_count} errors")
+        logger.info(
+            f"Workday: {result.job_count} jobs, {result.error_count} errors, "
+            f"status={result.status}"
+        )
     except Exception as e:
         logger.error(f"Workday scanner failed entirely: {e}")
 
-    # 2. JobSpy scanner (LinkedIn, Indeed, Google)
+    # 2. JobSpy scanner (LinkedIn, Indeed, Google). Imported lazily: on
+    # runtimes where the numpy/jobspy stack cannot even be imported
+    # (e.g. Python 3.14), record DEPENDENCY_FAILURE instead of crashing
+    # the whole pipeline.
     try:
+        from scanners.jobspy_scanner import JobSpyScanner
+
         jobspy = JobSpyScanner(config)
         result = await jobspy.scan()
         scan_results.append(result)
-        logger.info(f"JobSpy: {result.job_count} jobs, {result.error_count} errors")
+        logger.info(
+            f"JobSpy: {result.job_count} jobs, {result.error_count} errors, "
+            f"status={result.status}"
+        )
     except Exception as e:
+        fallback = ScanResult(scanner_name="jobspy")
+        fallback.note_error(f"JobSpy unavailable: {e}", classify_exception(e))
+        fallback.status = ScanStatus.DEPENDENCY_FAILURE.value
+        scan_results.append(fallback)
         logger.error(f"JobSpy scanner failed entirely: {e}")
 
-    # 3. Merge through bridge
+    # 3. Websearch scanner (companies with scan_method=websearch)
+    try:
+        from scanners.websearch_scanner import WebSearchScanner
+
+        websearch = WebSearchScanner(config)
+        result = await websearch.scan()
+        scan_results.append(result)
+        logger.info(
+            f"Websearch: {result.job_count} jobs, {result.error_count} errors, "
+            f"status={result.status}"
+        )
+    except Exception as e:
+        logger.error(f"Websearch scanner failed entirely: {e}")
+
+    # 4. Merge through bridge
     bridge = PipelineBridge(config)
     summary = bridge.process(scan_results, dry_run=dry_run)
 
@@ -95,6 +124,11 @@ async def run_scan(dry_run: bool = False):
     logger.info(f"  Rejected (loc):    {summary['rejected_location']}")
     logger.info(f"  Duplicates:        {summary['duplicates']}")
     logger.info(f"  [OK] New added:    {summary['new_added']}")
+    for result in scan_results:
+        logger.info(
+            f"  [scanner] {result.scanner_name}: {result.job_count} jobs, "
+            f"status={result.status}"
+        )
 
     if summary["errors"]:
         logger.warning(f"  [!] Errors ({len(summary['errors'])}):")

@@ -74,9 +74,11 @@ tracked_companies:
 
   - name: DATEV
     careers_url: "https://www.datev.de/web/de/karriere/"
-    scan_method: websearch
-    scan_query: '"working student" OR "werkstudent" site:datev.de'
-    notes: "Nürnberg. Major software company."
+    scan_method: workday
+    search_terms:
+      - "Werkstudent"
+      - "working student"
+    notes: "Nürnberg. Major software company. Workday tenant datev / board Datev_Careers (verified 2026-09-04)."
     enabled: true
 
   - name: Bosch
@@ -84,7 +86,8 @@ tracked_companies:
     scan_method: workday
     search_terms:
       - "working student"
-    notes: "Multiple Bavaria locations."
+      - "Werkstudent"
+    notes: "Multiple Bavaria locations. SmartRecruiters identifier BoschGroup (verified 2026-09-04)."
     enabled: true
 
   - name: Fraunhofer IIS

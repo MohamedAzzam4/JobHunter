@@ -17,7 +17,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import yaml
 from dotenv import load_dotenv
 
 from run_scan import run_scan
@@ -44,13 +43,11 @@ async def run_pipeline(dry_run: bool = False, scan_only: bool = False, threshold
     """Execute the full pipeline."""
     load_dotenv()
 
-    # Load threshold from config (or CLI override)
-    profile_path = Path("config/profile.yml")
-    if profile_path.exists():
-        with open(profile_path, "r", encoding="utf-8") as f:
-            profile = yaml.safe_load(f) or {}
-    else:
-        profile = {}
+    # Load threshold from config (or CLI override). The gitignored local
+    # profile never changes thresholds (see utils/profile_loader).
+    from utils.profile_loader import load_profile_with_local
+
+    profile = load_profile_with_local()
     threshold = threshold_override if threshold_override is not None else profile.get("evaluation", {}).get("auto_cv_threshold", 3.5)
     start = datetime.now()
 
