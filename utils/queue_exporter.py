@@ -126,6 +126,7 @@ MISSING_DOCUMENTS = "missing_documents"
 DOCUMENT_NOT_FOUND = "document_not_found"
 MISSING_REQUIRED_FIELDS = "missing_required_fields"
 DUPLICATE_APPLICATION_ID = "duplicate_application_id"
+APPLICATION_EXPIRED = "application_expired"
 
 SKIP_REASONS: frozenset[str] = frozenset(
     {
@@ -140,6 +141,7 @@ SKIP_REASONS: frozenset[str] = frozenset(
         DOCUMENT_NOT_FOUND,
         MISSING_REQUIRED_FIELDS,
         DUPLICATE_APPLICATION_ID,
+        APPLICATION_EXPIRED,
     }
 )
 
@@ -858,6 +860,7 @@ def export_queue(
     pipeline_path: Path = Path("data/pipeline.md"),
     profile_path: Path = Path("config/profile.yml"),
     threshold: float | None = None,
+    freshness_check: bool = True,
 ) -> dict[str, Any]:
     """Export the application_queue.jsonl file.
 
@@ -865,9 +868,14 @@ def export_queue(
     1. Loads evaluations.json, pipeline.md, and profile.yml.
     2. Builds queue rows for the jobs that pass all eligibility filters
        (with structured skip reasons for every excluded job).
-    3. Atomically writes them to output_path as JSONL (never exposing a
+    3. Revalidates each row's application target where a deterministic
+       public lookup exists (unless ``freshness_check`` is False);
+       positively expired targets are excluded with reason
+       ``application_expired``. Transient/unknown lookup states never
+       block export.
+    4. Atomically writes them to output_path as JSONL (never exposing a
        partial file; the previous queue survives a failed write).
-    4. Returns a summary dict with exported/skipped counts and reasons.
+    5. Returns a summary dict with exported/skipped counts and reasons.
 
     The export is deterministic and idempotent: identical input produces
     byte-stable output, and re-running replaces (never appends) the file.
@@ -882,6 +890,8 @@ def export_queue(
         profile_path: Path to profile.yml.
         threshold: Minimum score to include. If None, reads from profile.yml
             (evaluation.auto_cv_threshold, default 3.5).
+        freshness_check: Revalidate application targets before export
+            (default True). Disable only for offline/hermetic use.
 
     Returns:
         A summary dict with counts and structured skip reasons.
@@ -900,6 +910,12 @@ def export_queue(
     pipeline_jobs = _parse_pipeline_md(pipeline_path)
 
     rows, skipped = build_queue_entries(evaluations, pipeline_jobs, profile_snapshot, threshold)
+
+    if freshness_check and rows:
+        from utils.freshness import filter_fresh_rows
+
+        rows, freshness_skipped = filter_fresh_rows(rows)
+        skipped.extend(freshness_skipped)
 
     # Atomic publish: replace the finished queue atomically.
     _atomic_write_jsonl(output_path, rows)
@@ -937,6 +953,7 @@ __all__ = [
     "extract_candidate_profile_snapshot",
     "load_evaluations",
     "canonicalize_url",
+    "APPLICATION_EXPIRED",
     "INVALID_URL",
     "SKIP_REASONS",
 ]
