@@ -62,7 +62,26 @@ def main() -> None:
         default=None,
         help="Override auto_cv_threshold (default: read from profile.yml)",
     )
+    parser.add_argument(
+        "--application-id",
+        type=str,
+        default=None,
+        help="Owner-selected: exact application_id to export (requires --owner-selected)",
+    )
+    parser.add_argument(
+        "--owner-selected",
+        action="store_true",
+        help="Owner-selected pilot mode: permits recommendation 'consider' (never converts to 'apply'), enforces DIRECT_ATS/CAREER_DETAIL_SAFE_APPLY, Siemens/expired/SOURCE_ONLY/lineage gates",
+    )
     args = parser.parse_args()
+
+    if args.owner_selected and args.application_id is not None:
+        # Normalize application_id: strip, lower, validate 64 hex
+        args.application_id = args.application_id.strip().lower()
+        if len(args.application_id) != 64 or not all(c in "0123456789abcdef" for c in args.application_id):
+            parser.error("--application-id must be a 64-char lowercase hex SHA-256")
+    if args.application_id is not None and not args.owner_selected:
+        parser.error("--application-id requires --owner-selected (owner authorization)")
 
     from utils.queue_exporter import export_queue
 
@@ -72,9 +91,11 @@ def main() -> None:
         pipeline_path=Path(args.pipeline),
         profile_path=Path(args.profile),
         threshold=args.threshold,
+        owner_selected=args.owner_selected,
+        owner_application_id=args.application_id,
     )
 
-    print(f"\nExport summary:")
+    print("\nExport summary:")
     for k, v in summary.items():
         print(f"  {k}: {v}")
 

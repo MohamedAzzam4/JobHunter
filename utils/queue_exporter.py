@@ -127,6 +127,10 @@ DOCUMENT_NOT_FOUND = "document_not_found"
 MISSING_REQUIRED_FIELDS = "missing_required_fields"
 DUPLICATE_APPLICATION_ID = "duplicate_application_id"
 APPLICATION_EXPIRED = "application_expired"
+# Owner-selected pilot gates (Phase 1.2 — narrow, additive, no threshold change)
+SIEMENS_BLOCKED = "siemens_blocked"
+TARGET_NOT_ELIGIBLE = "target_not_eligible"
+DOCUMENT_LINEAGE_MISMATCH = "document_lineage_mismatch"
 
 SKIP_REASONS: frozenset[str] = frozenset(
     {
@@ -142,6 +146,9 @@ SKIP_REASONS: frozenset[str] = frozenset(
         MISSING_REQUIRED_FIELDS,
         DUPLICATE_APPLICATION_ID,
         APPLICATION_EXPIRED,
+        SIEMENS_BLOCKED,
+        TARGET_NOT_ELIGIBLE,
+        DOCUMENT_LINEAGE_MISMATCH,
     }
 )
 
@@ -461,6 +468,8 @@ def build_queue_entries(
     pipeline_jobs: dict[str, dict[str, str]],
     profile_snapshot: dict[str, Any],
     threshold: float = 3.5,
+    owner_selected: bool = False,
+    owner_application_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Build the queue rows plus the structured list of skipped jobs.
 
@@ -471,12 +480,17 @@ def build_queue_entries(
     3. the URL must be HTTP(S) with a hostname          -> ``invalid_url``
     4. ``global_score`` must be numeric                 -> ``invalid_score``
     5. ``global_score >= threshold``                    -> ``below_threshold``
-    6. recommendation must be empty or ``apply``        -> ``not_recommended``
+    6. recommendation gate: autonomous allows only ``apply``;
+       owner-selected allows only ``consider``            -> ``not_recommended``
+       (owner selection NEVER converts ``consider`` into ``apply``)
     7. the URL must be new                              -> ``duplicate_url``
     8. company and title must be present                -> ``missing_required_fields``
     9. ``cv_pdf`` and ``cover_letter_pdf`` values       -> ``missing_documents``
     10. both PDFs must exist on disk                    -> ``document_not_found``
-    11. the computed ``application_id`` must be new     -> ``duplicate_application_id``
+    11. owner-selected target-quality + Siemens guard   -> ``siemens_blocked`` / ``target_not_eligible``
+    12. the computed ``application_id`` must be new     -> ``duplicate_application_id``
+    13. owner-selected application_id filter (when set) -> skipped (silent)
+    14. owner-selected document lineage                 -> ``document_lineage_mismatch``
 
     Evaluations are processed in a deterministic order (sorted by URL/title/
     company) and the returned rows are sorted by ``application_id``, so
@@ -499,6 +513,7 @@ def build_queue_entries(
     skipped: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
     seen_ids: set[str] = set()
+    seen_doc_paths: dict[str, str] = {}
 
     # Deterministic processing order independent of input ordering.
     ordered = sorted(
@@ -584,20 +599,36 @@ def build_queue_entries(
             )
             continue
 
-        # 6. Only jobs recommended for apply are eligible (skip_german,
-        # skip, etc. are excluded under the current contract).
+        # 6. Recommendation gate — autonomous vs owner-selected.
+        # Autonomous: only ``apply`` is eligible (empty treated as apply for
+        # legacy records). Owner-selected: only ``consider`` is eligible and
+        # the original recommendation is NEVER rewritten to ``apply``.
         recommendation = evaluation.get("recommendation", "")
-        if recommendation and str(recommendation).strip().lower() != "apply":
-            skipped.append(
-                _skip_record(
-                    str(url),
-                    str(evaluation.get("company", "")),
-                    str(evaluation.get("title", "")),
-                    NOT_RECOMMENDED,
-                    f"recommendation is {str(recommendation)!r}, not 'apply'",
+        rec_lower = str(recommendation).strip().lower() if recommendation else ""
+        if owner_selected:
+            if rec_lower != "consider":
+                skipped.append(
+                    _skip_record(
+                        str(url),
+                        str(evaluation.get("company", "")),
+                        str(evaluation.get("title", "")),
+                        NOT_RECOMMENDED,
+                        f"owner-selected only permits recommendation 'consider', got {str(recommendation)!r}",
+                    )
                 )
-            )
-            continue
+                continue
+        else:
+            if rec_lower and rec_lower != "apply":
+                skipped.append(
+                    _skip_record(
+                        str(url),
+                        str(evaluation.get("company", "")),
+                        str(evaluation.get("title", "")),
+                        NOT_RECOMMENDED,
+                        f"recommendation is {str(recommendation)!r}, not 'apply'",
+                    )
+                )
+                continue
 
         # 7. No duplicate URL in one export.
         if url in seen_urls:
@@ -693,6 +724,34 @@ def build_queue_entries(
             or classify_target_quality(url, source)
         )
 
+        # Owner-selected defensive gates: Siemens is always blocked and only
+        # DIRECT_ATS / CAREER_DETAIL_SAFE_APPLY are eligible.
+        if owner_selected:
+            if platform == "siemens":
+                skipped.append(
+                    _skip_record(
+                        str(url),
+                        company,
+                        title,
+                        SIEMENS_BLOCKED,
+                        f"siemens platform blocked for owner-selected pilot: {url!r}",
+                    )
+                )
+                continue
+            from utils.target_quality import PILOT_ELIGIBLE_QUALITIES, SOURCE_ONLY
+
+            if target_quality == SOURCE_ONLY or target_quality not in PILOT_ELIGIBLE_QUALITIES:
+                skipped.append(
+                    _skip_record(
+                        str(url),
+                        company,
+                        title,
+                        TARGET_NOT_ELIGIBLE,
+                        f"target quality {target_quality!r} not pilot eligible (need DIRECT_ATS or CAREER_DETAIL_SAFE_APPLY)",
+                    )
+                )
+                continue
+
         # External-ID normalization at the JobHunter/UAA boundary. The raw
         # value may be an integer (e.g. 512492 or 0), a string, or an
         # unsupported type; _normalize_external_job_id turns it into a
@@ -734,6 +793,49 @@ def build_queue_entries(
             continue
         seen_ids.add(application_id)
 
+        # Owner-selected: filter to the explicitly authorized application_id
+        # when a target ID was supplied. Non-matching rows are silently skipped
+        # (they are not errors — only the authorized ID may be exported).
+        if owner_selected and owner_application_id is not None:
+            if application_id != owner_application_id:
+                skipped.append(
+                    _skip_record(
+                        str(url),
+                        company,
+                        title,
+                        NOT_RECOMMENDED,
+                        f"not the owner-selected application_id {owner_application_id[:8]}…",
+                    )
+                )
+                continue
+
+        # Owner-selected document-lineage gate: the same physical PDF must not
+        # be reused across different application_ids (cross-job document reuse).
+        if owner_selected:
+            for doc_path in (cv_pdf_abs, cover_pdf_abs):
+                if doc_path in seen_doc_paths and seen_doc_paths[doc_path] != application_id:
+                    skipped.append(
+                        _skip_record(
+                            str(url),
+                            company,
+                            title,
+                            DOCUMENT_LINEAGE_MISMATCH,
+                            f"document {doc_path!r} already used by application {seen_doc_paths[doc_path][:8]}… — cross-job reuse",
+                        )
+                    )
+                    # Mark lineage failure and skip this row
+                    lineage_failed = True
+                    break
+                seen_doc_paths[doc_path] = application_id
+            else:
+                lineage_failed = False
+            if lineage_failed:
+                continue
+        else:
+            # Still track doc paths for duplicate detection in autonomous mode
+            for doc_path in (cv_pdf_abs, cover_pdf_abs):
+                seen_doc_paths.setdefault(doc_path, application_id)
+
         date_posted = evaluation.get("date_posted")
         if date_posted:
             # Normalize to YYYY-MM-DD if it's a datetime.
@@ -753,6 +855,26 @@ def build_queue_entries(
             if cover_md:
                 documents["cover_letter_md"] = str(Path(cover_md).resolve())
 
+        # Preserve original recommendation: autonomous exports "apply",
+        # owner-selected preserves "consider" (never convert consider -> apply).
+        if owner_selected:
+            # rec_lower is already lowercased "consider"
+            verdict = rec_lower if rec_lower in ("apply", "consider", "skip") else "consider"
+        else:
+            verdict = "apply"
+
+        metadata: dict[str, Any] = {
+            "candidate_profile": profile_snapshot,
+            "score_breakdown": evaluation.get("scores"),
+            "target_quality": target_quality,
+        }
+        if owner_selected:
+            metadata["selection_source"] = "owner"
+            metadata["owner_selected"] = True
+            metadata["original_recommendation"] = rec_lower
+        else:
+            metadata["selection_source"] = "auto"
+
         row: dict[str, Any] = {
             "application_id": application_id,
             "platform": platform,
@@ -763,7 +885,7 @@ def build_queue_entries(
             "location": location,
             "job_description": evaluation.get("description", ""),
             "score": score_float,
-            "verdict": "apply",
+            "verdict": verdict,
             "cv_pdf": cv_pdf_abs,
             "cover_letter_pdf": cover_pdf_abs,
             "status": "ready_to_apply",
@@ -776,11 +898,7 @@ def build_queue_entries(
             or evaluation.get("reasoning", ""),
             "german_filter_result": evaluation.get("german_level_required", ""),
             "documents": documents,
-            "metadata": {
-                "candidate_profile": profile_snapshot,
-                "score_breakdown": evaluation.get("scores"),
-                "target_quality": target_quality,
-            },
+            "metadata": metadata,
         }
         rows.append(row)
 
@@ -795,6 +913,8 @@ def build_queue_rows(
     pipeline_jobs: dict[str, dict[str, str]],
     profile_snapshot: dict[str, Any],
     threshold: float = 3.5,
+    owner_selected: bool = False,
+    owner_application_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build a list of ApplicationJob-compatible queue rows.
 
@@ -819,7 +939,9 @@ def build_queue_rows(
         A list of dicts, each compatible with UAA's ApplicationJob contract,
         deterministically ordered and free of duplicate URLs / application_ids.
     """
-    rows, _skipped = build_queue_entries(evaluations, pipeline_jobs, profile_snapshot, threshold)
+    rows, _skipped = build_queue_entries(
+        evaluations, pipeline_jobs, profile_snapshot, threshold, owner_selected, owner_application_id
+    )
     return rows
 
 
@@ -861,6 +983,8 @@ def export_queue(
     profile_path: Path = Path("config/profile.yml"),
     threshold: float | None = None,
     freshness_check: bool = True,
+    owner_selected: bool = False,
+    owner_application_id: str | None = None,
 ) -> dict[str, Any]:
     """Export the application_queue.jsonl file.
 
@@ -909,7 +1033,9 @@ def export_queue(
     evaluations = load_evaluations(evaluations_path)
     pipeline_jobs = _parse_pipeline_md(pipeline_path)
 
-    rows, skipped = build_queue_entries(evaluations, pipeline_jobs, profile_snapshot, threshold)
+    rows, skipped = build_queue_entries(
+        evaluations, pipeline_jobs, profile_snapshot, threshold, owner_selected, owner_application_id
+    )
 
     if freshness_check and rows:
         from utils.freshness import filter_fresh_rows
@@ -955,5 +1081,8 @@ __all__ = [
     "canonicalize_url",
     "APPLICATION_EXPIRED",
     "INVALID_URL",
+    "SIEMENS_BLOCKED",
+    "TARGET_NOT_ELIGIBLE",
+    "DOCUMENT_LINEAGE_MISMATCH",
     "SKIP_REASONS",
 ]
